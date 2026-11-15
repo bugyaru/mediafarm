@@ -1,0 +1,60 @@
+{{- if .Values.workerCuda.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mf.fullname" . }}-worker-cuda
+spec:
+  replicas: {{ .Values.workerCuda.replicas }}
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 0, maxUnavailable: 1}}
+  selector:
+    matchLabels:
+      {{- include "mf.selector" . | nindent 6 }}
+      app.kubernetes.io/component: worker-cuda
+  template:
+    metadata:
+      labels:
+        {{- include "mf.selector" . | nindent 8 }}
+        app.kubernetes.io/component: worker-cuda
+    spec:
+      runtimeClassName: {{ .Values.workerCuda.runtimeClassName }}
+      nodeSelector: {{- toYaml .Values.workerCuda.nodeSelector | nindent 8 }}
+      tolerations: {{- toYaml .Values.workerCuda.tolerations | nindent 8 }}
+      terminationGracePeriodSeconds: 1800
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.registry }}/worker:{{ .Values.image.tag }}-cuda"
+          ports: [{name: metrics, containerPort: {{ .Values.workerCuda.metricsPort }}}]
+          envFrom:
+            - configMapRef: {name: {{ include "mf.fullname" . }}-config}
+            - secretRef: {name: {{ include "mf.secretName" . }}}
+          env:
+            - {name: MF_ROLE, value: worker}
+            - {name: MF_KIND, value: cuda}
+            - {name: MF_CPU_SLOTS, value: {{ .Values.workerCuda.cpuSlots | quote }}}
+            - {name: MF_GPU_SLOTS, value: {{ .Values.workerCuda.gpuSlots | quote }}}
+            - {name: MF_NVENC_SESSION_LIMIT, value: {{ .Values.workerCuda.nvencSessionLimit | quote }}}
+            - {name: MF_GPU_MIN_FREE_MEM_MB, value: {{ .Values.workerCuda.gpuMinFreeMemMb | quote }}}
+            - {name: MF_ON_SIGTERM, value: {{ .Values.workerCuda.onSigterm | quote }}}
+            - {name: MF_SCRATCH, value: /scratch}
+            - {name: MF_METRICS_PORT, value: {{ .Values.workerCuda.metricsPort | quote }}}
+            - {name: NVIDIA_DRIVER_CAPABILITIES, value: "video,compute,utility"}
+            - {name: NVIDIA_VISIBLE_DEVICES, value: all}
+            - name: MF_WORKER_ID
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: MF_DB_DSN
+              valueFrom: {secretKeyRef: {name: {{ include "mf.secretName" . }}, key: db-dsn}}
+          volumeMounts: [{name: scratch, mountPath: /scratch}]
+          resources: {{- toYaml .Values.workerCuda.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["python", "-c", "import worker.drain as d; d.mark_draining()"]
+      volumes:
+        - name: scratch
+          emptyDir: {sizeLimit: {{ .Values.workerCuda.scratchSize }}}
+  {{- end }}

@@ -1,0 +1,120 @@
+name: mediafarm
+
+x-env: &env
+  MF_DB_DSN: postgresql+asyncpg://mf:mf@postgres:5432/mf
+  MF_LOG_FORMAT: json
+  MF_SECRET_PROVIDER: env
+  MF_UI_SECRET_KEY: ${MF_UI_SECRET_KEY:-change-me-32-bytes-minimum-length}
+  MF_UI_BOOTSTRAP_PASSWORD: ${MF_UI_BOOTSTRAP_PASSWORD:-admin-password-123}
+  MF_UI_INTERNAL_TOKEN: ${MF_UI_INTERNAL_TOKEN:-internal-dev-token}
+  MF_UI_BASE_URL: http://localhost:8080
+  MF_SECRET_IN_SMB_USERNAME: ${SMB_USER:-}
+  MF_SECRET_IN_SMB_PASSWORD: ${SMB_PASSWORD:-}
+  MF_SECRET_OUT_S3_ACCESS_KEY: ${S3_ACCESS_KEY:-mfadmin}
+  MF_SECRET_OUT_S3_SECRET_KEY: ${S3_SECRET_KEY:-mfadmin123}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: mf, POSTGRES_PASSWORD: mf, POSTGRES_DB: mf}
+    command: >
+      postgres -c max_connections=300 -c shared_buffers=512MB
+               -c autovacuum_vacuum_scale_factor=0.02
+               -c autovacuum_analyze_scale_factor=0.01
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mf -d mf"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    image: mediafarm/migrations:dev
+    build: {context: .., dockerfile: docker/migrations.Dockerfile}
+    environment: *env
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: "no"
+
+  ui:
+    image: mediafarm/ui:dev
+    build:
+      context: ..
+      dockerfile: docker/ui.Dockerfile
+      args: {APP_BASE: mediafarm/app-base:ui-dev}
+    environment: *env
+    ports: ["8080:8080"]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+
+  watcher:
+    image: mediafarm/watcher:dev
+    build:
+      context: ..
+      dockerfile: docker/watcher.Dockerfile
+      args: {APP_BASE: mediafarm/app-base:watcher-dev}
+    environment:
+      <<: *env
+      MF_ROLE: watcher
+      MF_METRICS_PORT: "9101"
+      MF_WATCHER_POLL_S: "15"
+    volumes: ["./data/in:/data/in", "./data/out:/data/out"]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+
+  worker-cpu:
+    image: mediafarm/worker:dev-cpu
+    build:
+      context: ..
+      dockerfile: docker/worker.Dockerfile
+      args:
+        APP_BASE: mediafarm/app-base:worker-dev
+        MEDIA_BASE: mediafarm/media-base:cpu-dev
+    environment:
+      <<: *env
+      MF_KIND: cpu
+      MF_CPU_SLOTS: "2"
+      MF_GPU_SLOTS: "0"
+      MF_FFMBC_ENABLED: "true"
+    volumes: ["./data:/data", "scratch-cpu:/scratch"]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+
+  worker-cuda:
+    image: mediafarm/worker:dev-cuda
+    build:
+      context: ..
+      dockerfile: docker/worker.Dockerfile
+      args:
+        APP_BASE: mediafarm/app-base:worker-dev
+        MEDIA_BASE: mediafarm/media-base:cuda-dev
+    environment:
+      <<: *env
+      MF_KIND: cuda
+      MF_CPU_SLOTS: "4"
+      MF_GPU_SLOTS: "6"
+      MF_NVENC_SESSION_LIMIT: "0"
+      MF_GPU_MIN_FREE_MEM_MB: "2000"
+      NVIDIA_DRIVER_CAPABILITIES: video,compute,utility
+    volumes: ["./data:/data", "scratch-gpu:/scratch"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: mfadmin
+      MINIO_ROOT_PASSWORD: mfadmin123
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio:/data"]
+    profiles: ["s3"]
+
+volumes:
+  pgdata: {}
+  scratch-cpu: {}
+  scratch-gpu: {}
+  minio: {}

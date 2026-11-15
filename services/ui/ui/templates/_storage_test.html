@@ -1,0 +1,6 @@
+<!-- _storage_test.html -->
+<div class="flash {{ 'ok' if result.ok else 'err' }}">
+    {% if result.ok %}OK · {{ result.latency_ms }} ms · записываемое: {{ result.writable }}
+    · объектов: {{ result.entries|length }}
+    {% else %}{{ result.error }}{% endif %}
+</div>

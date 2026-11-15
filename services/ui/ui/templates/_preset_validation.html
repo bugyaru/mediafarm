@@ -1,0 +1,6 @@
+<!-- _preset_validation.html -->
+<div class="flash {{ 'ok' if result.ok else 'err' }}">
+    {% if result.ok %}Пресет валиден · воркеров: {{ result.workers }} (GPU: {{ result.gpu_workers }})
+    <ul>{% for w in result.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+    {% else %}{{ result.error }}{% endif %}
+</div>

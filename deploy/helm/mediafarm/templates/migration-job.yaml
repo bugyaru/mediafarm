@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "mf.fullname" . }}-migrate-{{ .Release.Revision }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: {{ include "mf.image" (dict "root" . "name" "migrations") }}
+          command: ["alembic", "upgrade", "head"]
+          env:
+            - name: MF_DB_DSN
+              valueFrom: {secretKeyRef: {name: {{ include "mf.secretName" . }}, key: db-dsn}}

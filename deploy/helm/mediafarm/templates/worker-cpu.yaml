@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mf.fullname" . }}-worker-cpu
+spec:
+  replicas: {{ .Values.workerCpu.replicas }}
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 0, maxUnavailable: 1}}
+  selector:
+    matchLabels:
+      {{- include "mf.selector" . | nindent 6 }}
+      app.kubernetes.io/component: worker-cpu
+  template:
+    metadata:
+      labels:
+        {{- include "mf.selector" . | nindent 8 }}
+        app.kubernetes.io/component: worker-cpu
+    spec:
+      terminationGracePeriodSeconds: 1800
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.registry }}/worker:{{ .Values.image.tag }}-cpu"
+          ports: [{name: metrics, containerPort: {{ .Values.workerCpu.metricsPort }}}]
+          envFrom:
+            - configMapRef: {name: {{ include "mf.fullname" . }}-config}
+            - secretRef: {name: {{ include "mf.secretName" . }}}
+          env:
+            - {name: MF_ROLE, value: worker}
+            - {name: MF_KIND, value: cpu}
+            - {name: MF_CPU_SLOTS, value: {{ .Values.workerCpu.cpuSlots | quote }}}
+            - {name: MF_GPU_SLOTS, value: "0"}
+            - {name: MF_ON_SIGTERM, value: {{ .Values.workerCpu.onSigterm | quote }}}
+            - {name: MF_SCRATCH, value: /scratch}
+            - {name: MF_METRICS_PORT, value: {{ .Values.workerCpu.metricsPort | quote }}}
+            - name: MF_WORKER_ID
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: MF_DB_DSN
+              valueFrom: {secretKeyRef: {name: {{ include "mf.secretName" . }}, key: db-dsn}}
+          volumeMounts: [{name: scratch, mountPath: /scratch}]
+          resources: {{- toYaml .Values.workerCpu.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+      volumes:
+        - name: scratch
+          emptyDir: {sizeLimit: {{ .Values.workerCpu.scratchSize }}}

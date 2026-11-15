@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block content %}
+<h1>Ассеты</h1>
+<form method="get" class="row">
+    <input name="q" value="{{ q }}" placeholder="поиск по URI">
+    <select name="state" onchange="this.form.submit()"><option value="">все</option>
+        {% for s in ['new','planned','processing','done','failed','broken','skipped'] %}
+        <option {% if state==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    <button>Найти</button>
+</form>
+<table><thead><tr><th>URI</th><th>Тип</th><th>Размер</th><th>Состояние</th><th>Задача</th></tr></thead><tbody>
+{% for a in assets %}<tr><td><code>{{ a.uri|truncate(80) }}</code></td><td>{{ a.kind }}</td>
+    <td>{{ a.size }}</td><td class="st-{{ a.state }}">{{ a.state }}</td>
+    <td><form hx-post="/jobs" hx-swap="none" class="row">
+        <input type="hidden" name="asset_id" value="{{ a.id }}">
+        <select name="preset_name">{% for p in presets %}<option>{{ p.name }}</option>{% endfor %}</select>
+        <button>Конвертировать</button></form></td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

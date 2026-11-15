@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block content %}
+<h1>Воркеры</h1>
+<div hx-get="/workers" hx-trigger="every 10s" hx-select="table" hx-target="table" hx-swap="outerHTML">
+    <table><thead><tr><th>ID</th><th>Тип</th><th>Состояние</th><th>CPU</th><th>GPU</th>
+        <th>Модель</th><th>NVENC</th><th>Heartbeat</th><th></th></tr></thead><tbody>
+    {% for w in workers %}
+    <tr><td>{{ w.id }}</td><td>{{ w.kind }}</td><td class="st-{{ w.state }}">{{ w.state }}</td>
+        <td>{{ w.cpu_used }}/{{ w.cpu_slots }}</td><td>{{ w.gpu_used }}/{{ w.gpu_slots }}</td>
+        <td>{{ w.labels.get('gpu_model','—') }}</td><td>{{ w.labels.get('nvenc','—') }}</td>
+        <td>{{ w.heartbeat_at }}</td>
+        <td><button hx-post="/workers/{{ w.id }}/drain" hx-swap="none">Drain</button></td></tr>
+    {% else %}<tr><td colspan="9">воркеров нет</td></tr>{% endfor %}
+    </tbody></table></div>
+{% endblock %}

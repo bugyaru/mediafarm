@@ -1,0 +1,90 @@
+image:
+  registry: mediafarm
+  tag: dev
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+existingSecret: ""          # если задан — secret.yaml не создаётся
+secrets:
+  dbDsn: postgresql+asyncpg://mf:mf@mediafarm-postgres:5432/mf
+  uiSecretKey: change-me-32-bytes-minimum-length
+  uiBootstrapPassword: admin-password-123
+  internalToken: internal-dev-token
+  kedaConnection: postgresql://mf:mf@mediafarm-postgres:5432/mf?sslmode=disable
+  storage:
+    MF_SECRET_IN_SMB_USERNAME: ""
+    MF_SECRET_IN_SMB_PASSWORD: ""
+    MF_SECRET_OUT_S3_ACCESS_KEY: ""
+    MF_SECRET_OUT_S3_SECRET_KEY: ""
+
+config:
+  MF_LOG_FORMAT: json
+  MF_SECRET_PROVIDER: env
+  MF_UI_BASE_URL: http://mediafarm.local
+  MF_WATCHER_POLL_S: "30"
+  MF_WATCHER_MAX_BACKLOG: "5000"
+  MF_UI_RETENTION_DAYS: "90"
+
+ui:
+  replicas: 2
+  port: 8080
+  resources:
+    requests: {cpu: 200m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  ingress:
+    enabled: true
+    className: nginx
+    host: mediafarm.local
+    tls: []
+
+watcher:
+  replicas: 2
+  metricsPort: 9101
+  resources:
+    requests: {cpu: 200m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+
+workerCpu:
+  replicas: 2
+  kind: cpu
+  cpuSlots: 4
+  gpuSlots: 0
+  metricsPort: 9100
+  scratchSize: 50Gi
+  onSigterm: drain
+  resources:
+    requests: {cpu: "2", memory: 4Gi}
+    limits: {cpu: "6", memory: 8Gi}
+
+workerCuda:
+  enabled: true
+  replicas: 1
+  kind: cuda
+  cpuSlots: 4
+  gpuSlots: 6                 # L40: без лимита сессий, старт с 6
+  nvencSessionLimit: 0
+  gpuMinFreeMemMb: 2000
+  metricsPort: 9100
+  scratchSize: 200Gi
+  onSigterm: drain
+  runtimeClassName: nvidia
+  nodeSelector:
+    nvidia.com/gpu.present: "true"
+  tolerations:
+    - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+  resources:
+    requests: {cpu: "2", memory: 4Gi, nvidia.com/gpu: "1"}
+    limits: {cpu: "8", memory: 16Gi, nvidia.com/gpu: "1"}
+
+keda:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 20
+  targetQueuePerReplica: "5"
+
+monitoring:
+  enabled: false
+networkPolicy:
+  enabled: false
+pdb:
+  enabled: true

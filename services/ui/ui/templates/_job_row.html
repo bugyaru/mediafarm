@@ -1,0 +1,12 @@
+<tr id="job-{{ job.id }}" {% if oob %}hx-swap-oob="outerHTML"{% endif %}>
+<td><a href="/jobs/{{ job.id }}">{{ job.id|string|truncate(8, True, '') }}</a></td>
+<td>{{ job.kind }}</td>
+<td class="st-{{ job.state }}">{{ job.state }}</td>
+<td>{{ job.progress.get('step','—') }}</td>
+<td><progress max="100" value="{{ job.progress.get('pct') or 0 }}"></progress>
+    {{ '%.1f'|format(job.progress.get('pct') or 0) }}%</td>
+<td>{{ job.progress.get('speed') or '' }}</td>
+<td>{{ job.attempts }}/{{ job.max_attempts }}</td>
+<td>{{ job.worker_id or '—' }}</td>
+<td>{% if job.requires_gpu %}GPU{% else %}CPU{% endif %}</td>
+</tr>

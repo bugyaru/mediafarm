@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block content %}
+<h1>Пресеты</h1>
+<form hx-post="/presets/seed" hx-swap="none"><button>Загрузить встроенные</button></form>
+<table><thead><tr><th>Имя</th><th>Версия</th><th>GPU</th><th>Шаги</th><th>Вкл</th></tr></thead><tbody>
+{% for p in presets %}<tr><td>{{ p.name }}</td><td>{{ p.version }}</td>
+    <td>{{ 'да' if p.spec.get('requires_gpu') else 'нет' }}</td>
+    <td>{{ p.spec.get('steps', [])|map(attribute='id')|join(', ') }}</td>
+    <td>{{ 'да' if p.enabled else 'нет' }}</td></tr>{% endfor %}
+</tbody></table>
+<div class="card"><h3>Новый пресет (JSON)</h3>
+    <textarea id="spec" name="spec" rows="18">{{ builtins and '' }}</textarea>
+    <div class="row">
+        <button hx-post="/presets/validate" hx-include="#spec" hx-target="#validation">Проверить</button>
+        <button hx-post="/presets" hx-include="#spec" hx-swap="none">Сохранить</button>
+    </div>
+    <div id="validation"></div>
+</div>
+{% endblock %}

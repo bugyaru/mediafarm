@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block content %}
+<h1>Расписания {% if not leader %}<small>(лидер на другой реплике)</small>{% endif %}</h1>
+<table><thead><tr><th>Имя</th><th>Cron</th><th>TZ</th><th>След.</th><th>Посл.</th><th>Вкл</th><th></th></tr></thead><tbody>
+{% for s in schedules %}<tr><td>{{ s.name }}</td><td><code>{{ s.cron }}</code></td><td>{{ s.timezone }}</td>
+    <td>{{ s.next_run_at or '—' }}</td><td>{{ s.last_run_at or '—' }}</td><td>{{ 'да' if s.enabled else 'нет' }}</td>
+    <td><button hx-post="/schedules/{{ s.id }}/toggle" hx-swap="none">Вкл/выкл</button></td></tr>{% endfor %}
+</tbody></table>
+<div class="card"><h3>Новое расписание</h3>
+    <form hx-post="/schedules" hx-swap="none" class="grid">
+        <input name="name" placeholder="nightly-capture" required>
+        <input name="cron" placeholder="*/15 * * * *" required>
+        <input name="timezone" value="UTC">
+        <textarea name="job_template" rows="8">{"kind":"capture","preset_name":"stream_capture","url":"https://…","params":{"max_duration_s":600}}</textarea>
+        <label><input type="checkbox" name="enabled" checked> включено</label>
+        <button>Сохранить</button>
+    </form></div>
+{% endblock %}

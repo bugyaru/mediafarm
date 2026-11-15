@@ -1,0 +1,14 @@
+<div id="stats" class="grid">
+    <div class="card"><h3>В очереди</h3><div class="big">{{ queued }}</div></div>
+    <div class="card"><h3>Выполняется</h3><div class="big">{{ running }}</div></div>
+    <div class="card"><h3>Ошибки</h3><div class="big err">{{ failed }}</div></div>
+    <div class="card"><h3>Ассеты</h3><div class="big">{{ assets }}</div></div>
+    <div class="card wide"><h3>Воркеры</h3>
+        <table><tbody>
+        {% for w in workers %}
+        <tr><td>{{ w.id }}</td><td>{{ w.kind }}</td><td class="st-{{ w.state }}">{{ w.state }}</td>
+            <td>CPU {{ w.cpu_used }}/{{ w.cpu_slots }}</td><td>GPU {{ w.gpu_used }}/{{ w.gpu_slots }}</td></tr>
+        {% else %}<tr><td>воркеров нет</td></tr>{% endfor %}
+        </tbody></table>
+    </div>
+</div>

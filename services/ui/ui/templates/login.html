@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block title %}Вход — MediaFarm{% endblock %}
+{% block content %}
+<div class="card narrow">
+    <h2>Вход</h2>
+    <form method="post" action="/login">
+        <input type="hidden" name="next_url" value="{{ request.query_params.get('next_url', '/') }}">
+        <label>Логин<input name="username" required autofocus></label>
+        <label>Пароль<input name="password" type="password" required></label>
+        <button type="submit">Войти</button>
+    </form>
+    {% if oidc %}<p><a href="/auth/oidc">Войти через SSO (OIDC)</a></p>{% endif %}
+</div>
+{% endblock %}

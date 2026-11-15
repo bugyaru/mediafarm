@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block content %}
+<h1>Папки наблюдения</h1>
+<table><thead><tr><th>Имя</th><th>Путь</th><th>Парсер</th><th>Последний скан</th><th>Вкл</th><th></th></tr></thead><tbody>
+{% for f in folders %}
+<tr><td>{{ f.name }}</td><td><code>{{ f.path }}</code></td><td>{{ f.parser_id or '—' }}</td>
+    <td>{{ f.last_scan_at or '—' }}</td><td>{{ 'да' if f.enabled else 'нет' }}</td>
+    <td class="row">
+        <button hx-post="/folders/{{ f.id }}/scan" hx-swap="none">Скан</button>
+        <button hx-post="/folders/{{ f.id }}/toggle" hx-swap="none">Вкл/выкл</button>
+        <button hx-get="/folders/{{ f.id }}/dry-run" hx-target="#dry-{{ f.id }}">Dry-run</button>
+    </td></tr>
+<tr><td colspan="6" id="dry-{{ f.id }}"></td></tr>
+{% endfor %}</tbody></table>
+<div class="card"><h3>Добавить папку</h3>
+    <form hx-post="/folders" hx-swap="none" class="grid">
+        <input name="name" placeholder="incoming" required>
+        <select name="storage_id">{% for s in storages %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
+        <input name="path" placeholder="incoming/">
+        <input name="preset_id" placeholder="preset_id (или пусто + job_template)">
+        <select name="parser_id"><option value="">без парсера</option>{% for p in parsers %}<option>{{ p }}</option>{% endfor %}</select>
+        <input name="include" value='["*.mxf","*.mp4","*.m3u8"]'>
+        <input name="exclude" value='["*.part"]'>
+        <input name="stability_s" type="number" value="60">
+        <input name="poll_interval_s" type="number" value="30">
+        <input name="ready_marker" placeholder="{name}.done (опц.)">
+        <textarea name="parser_opts" placeholder='{"item_xpath":".//Clip"}'>{}</textarea>
+        <textarea name="job_template" placeholder='{"preset_name":"proxy_1080p_nvenc","priority":100}'>{}</textarea>
+        <select name="archive_mode"><option>none</option><option>mark</option><option>move</option></select>
+        <input name="archive_path" placeholder="archive/">
+        <label><input type="checkbox" name="recursive" checked> рекурсивно</label>
+        <label><input type="checkbox" name="enabled" checked> включена</label>
+        <button>Добавить</button>
+    </form></div>
+{% endblock %}

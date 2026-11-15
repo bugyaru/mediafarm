@@ -1,0 +1,45 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "mf.fullname" . }}-pg
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: {{ include "mf.secretName" . }}
+      key: keda-connection
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "mf.fullname" . }}-worker-cpu
+spec:
+  scaleTargetRef: {name: {{ include "mf.fullname" . }}-worker-cpu}
+  minReplicaCount: {{ .Values.keda.minReplicas }}
+  maxReplicaCount: {{ .Values.keda.maxReplicas }}
+  cooldownPeriod: 300
+  triggers:
+    - type: postgresql
+      metadata:
+        query: "SELECT count(*) FROM job WHERE state='queued' AND NOT requires_gpu"
+        targetQueryValue: {{ .Values.keda.targetQueuePerReplica | quote }}
+      authenticationRef: {name: {{ include "mf.fullname" . }}-pg}
+  {{- if .Values.workerCuda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "mf.fullname" . }}-worker-cuda
+spec:
+  scaleTargetRef: {name: {{ include "mf.fullname" . }}-worker-cuda}
+  minReplicaCount: 0
+  maxReplicaCount: {{ .Values.keda.maxReplicas }}
+  cooldownPeriod: 600
+  triggers:
+    - type: postgresql
+      metadata:
+        query: "SELECT count(*) FROM job WHERE state='queued' AND requires_gpu"
+        targetQueryValue: "2"
+      authenticationRef: {name: {{ include "mf.fullname" . }}-pg}
+  {{- end }}
+  {{- end }}

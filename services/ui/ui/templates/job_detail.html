@@ -1,0 +1,25 @@
+{% extends "base.html" %}{% block content %}
+<h1>Задача {{ job.id }}</h1>
+<div class="card">
+    <p><b>{{ job.state }}</b> · {{ job.kind }} · попытки {{ job.attempts }}/{{ job.max_attempts }}
+        · воркер {{ job.worker_id or '—' }}</p>
+    <progress max="100" value="{{ job.progress.get('pct') or 0 }}"></progress>
+    {{ job.progress }}
+    <div class="row">
+        <form hx-post="/jobs/{{ job.id }}/cancel" hx-swap="none"><button>Отменить</button></form>
+        <form hx-post="/jobs/{{ job.id }}/retry" hx-swap="none"><button>Перезапустить</button></form>
+    </div>
+    {% if job.error %}<pre class="err">{{ job.error | tojson(indent=2) }}</pre>{% endif %}
+</div>
+<h2>Шаги</h2>
+<table><thead><tr><th>#</th><th>Шаг</th><th>Engine</th><th>Состояние</th><th>Метрики</th></tr></thead><tbody>
+{% for s in steps %}<tr><td>{{ s.idx }}</td><td>{{ s.name }}</td><td>{{ s.engine or '' }}</td>
+    <td class="st-{{ s.state }}">{{ s.state }}</td><td><code>{{ s.metrics | tojson }}</code></td></tr>{% endfor %}
+</tbody></table>
+<h2>Артефакты</h2>
+<ul>{% for a in artifacts %}<li>[{{ a.role }}] <code>{{ a.uri }}</code> ({{ a.size }} байт)</li>
+    {% else %}<li>нет</li>{% endfor %}</ul>
+<h2>События</h2>
+<table><tbody>{% for e in events %}<tr><td>{{ e.ts }}</td><td>{{ e.level }}</td>
+    <td>{{ e.type }}</td><td>{{ e.message }}</td></tr>{% endfor %}</tbody></table>
+{% endblock %}
