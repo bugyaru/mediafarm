@@ -1,10 +1,28 @@
 {% extends "base.html" %}{% block content %}
 <h1>Пользователи</h1>
-<table><thead><tr><th>Логин</th><th>Роль</th><th>Активен</th><th>SSO</th><th></th></tr></thead><tbody>
-{% for u in users %}<tr><td>{{ u.username }}</td><td>{{ u.role }}</td>
-    <td>{{ 'да' if u.is_active else 'нет' }}</td><td>{{ u.external_id or '—' }}</td>
-    <td><button hx-post="/users/{{ u.id }}/toggle" hx-swap="none">Вкл/выкл</button></td></tr>{% endfor %}
-</tbody></table>
+<table>
+    <thead>
+    <tr><th>Логин</th><th>Роль</th><th>Активен</th><th>SSO</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for u in users %}
+    <tr>
+        <td>{{ u.username }}</td>
+        <td>{{ u.role }}</td>
+        <td>{{ 'да' if u.is_active else 'нет' }}</td>
+        <td>{{ u.external_id or '—' }}</td>
+        <td class="row">
+            <button hx-post="/users/{{ u.id }}/toggle" hx-swap="none">Вкл/выкл</button>
+            {% if u.id != user.id %}
+            <form hx-post="/users/{{ u.id }}/delete" hx-swap="none" onsubmit="return confirm('Удалить пользователя?');">
+                <button class="danger">Удалить</button>
+            </form>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
 <div class="card"><h3>Создать</h3>
     <form hx-post="/users" hx-swap="none" class="row">
         <input name="username" required><input name="password" type="password" placeholder="≥12 символов">

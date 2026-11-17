@@ -2,7 +2,7 @@
 ARG INSTALL_FFMBC=1
 
 # ---- ffmbc: legacy-тулчейн, отдельный stage ----
-FROM ubuntu:20.04 AS ffmbc-build
+FROM ubuntu:18.04 AS ffmbc-build
 ARG INSTALL_FFMBC
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,7 +24,8 @@ FROM debian:bookworm-slim AS cpu
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl xz-utils ca-certificates libnuma1 libxml2 \
- && rm -rf /var/lib/apt/lists/*
+    python3 python3-minimal \
+&& rm -rf /var/lib/apt/lists/*
 ARG FFMPEG_BUILD=ffmpeg-master-latest-linux64-gpl
 RUN curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${FFMPEG_BUILD}.tar.xz" \
     | tar -xJ --strip-components=2 -C /usr/local/bin --wildcards '*/bin/ff*'

@@ -1,3 +1,4 @@
+version: "3.x"
 name: mediafarm
 
 x-env: &env
@@ -32,6 +33,7 @@ services:
   migrate:
     image: mediafarm/migrations:dev
     build: {context: .., dockerfile: docker/migrations.Dockerfile}
+    platform: linux/amd64
     environment: *env
     depends_on: {postgres: {condition: service_healthy}}
     restart: "no"
@@ -42,6 +44,7 @@ services:
       context: ..
       dockerfile: docker/ui.Dockerfile
       args: {APP_BASE: mediafarm/app-base:ui-dev}
+    platform: linux/amd64
     environment: *env
     ports: ["8080:8080"]
     depends_on: {migrate: {condition: service_completed_successfully}}
@@ -52,6 +55,7 @@ services:
       context: ..
       dockerfile: docker/watcher.Dockerfile
       args: {APP_BASE: mediafarm/app-base:watcher-dev}
+    platform: linux/amd64
     environment:
       <<: *env
       MF_ROLE: watcher
@@ -68,6 +72,7 @@ services:
       args:
         APP_BASE: mediafarm/app-base:worker-dev
         MEDIA_BASE: mediafarm/media-base:cpu-dev
+    platform: linux/amd64
     environment:
       <<: *env
       MF_KIND: cpu
@@ -77,41 +82,45 @@ services:
     volumes: ["./data:/data", "scratch-cpu:/scratch"]
     depends_on: {migrate: {condition: service_completed_successfully}}
 
-  worker-cuda:
-    image: mediafarm/worker:dev-cuda
-    build:
-      context: ..
-      dockerfile: docker/worker.Dockerfile
-      args:
-        APP_BASE: mediafarm/app-base:worker-dev
-        MEDIA_BASE: mediafarm/media-base:cuda-dev
-    environment:
-      <<: *env
-      MF_KIND: cuda
-      MF_CPU_SLOTS: "4"
-      MF_GPU_SLOTS: "6"
-      MF_NVENC_SESSION_LIMIT: "0"
-      MF_GPU_MIN_FREE_MEM_MB: "2000"
-      NVIDIA_DRIVER_CAPABILITIES: video,compute,utility
-    volumes: ["./data:/data", "scratch-gpu:/scratch"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu, video]
-    depends_on: {migrate: {condition: service_completed_successfully}}
-
   minio:
-    image: minio/minio:latest
+    image: elestio/minio:latest
     command: server /data --console-address :9001
     environment:
       MINIO_ROOT_USER: mfadmin
       MINIO_ROOT_PASSWORD: mfadmin123
+    platform: linux/amd64
     ports: ["9000:9000", "9001:9001"]
     volumes: ["minio:/data"]
-    profiles: ["s3"]
+    #profiles: ["s3"]
+
+
+#  worker-cuda:
+#    #image: mediafarm/worker:dev-cuda
+#    build:
+#      context: ..
+#      dockerfile: docker/worker.Dockerfile
+#      args:
+#        APP_BASE: mediafarm/app-base:worker-dev
+#        MEDIA_BASE: mediafarm/media-base:cuda-dev
+#    platform: linux/amd64
+#    environment:
+#      <<: *env
+#      MF_KIND: cuda
+#      MF_CPU_SLOTS: "4"
+#      MF_GPU_SLOTS: "6"
+#      MF_NVENC_SESSION_LIMIT: "0"
+#      MF_GPU_MIN_FREE_MEM_MB: "2000"
+#      NVIDIA_DRIVER_CAPABILITIES: video,compute,utility
+#    volumes: ["./data:/data", "scratch-gpu:/scratch"]
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [gpu, video]
+#    depends_on: {migrate: {condition: service_completed_successfully}}
+
 
 volumes:
   pgdata: {}

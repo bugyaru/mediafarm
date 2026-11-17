@@ -299,6 +299,7 @@ def upgrade() -> None:
         """)
 
     # NOTIFY для UI. Payload ограничен 8000 байт -> режем progress/error при переполнении.
+    # 1. Создаем функцию
     op.execute("""
         CREATE OR REPLACE FUNCTION mf_job_notify() RETURNS trigger AS $$
         DECLARE payload text;
@@ -320,12 +321,14 @@ def upgrade() -> None:
             RETURN NEW;
         END
         $$ LANGUAGE plpgsql;
+    """)
 
+    # 2. Создаем триггер
+    op.execute("""
         CREATE TRIGGER trg_job_notify
         AFTER INSERT OR UPDATE OF state, progress, error ON job
         FOR EACH ROW EXECUTE FUNCTION mf_job_notify();
     """)
-
 
 def downgrade() -> None:
     op.execute("DROP TRIGGER IF EXISTS trg_job_notify ON job")

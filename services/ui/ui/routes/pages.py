@@ -4,7 +4,8 @@ import json
 import uuid
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
+
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,11 +25,17 @@ op = require_role("operator")
 admin = require_role("admin")
 
 
+# def back(path: str, msg: str = "", err: str = "") -> RedirectResponse:
+#     from urllib.parse import urlencode
+#     query = urlencode({k: v for k, v in (("msg", msg), ("err", err)) if v})
+#     return RedirectResponse(f"{path}?{query}" if query else path, 303)
+
+
 def back(path: str, msg: str = "", err: str = "") -> RedirectResponse:
     from urllib.parse import urlencode
     query = urlencode({k: v for k, v in (("msg", msg), ("err", err)) if v})
-    return RedirectResponse(f"{path}?{query}" if query else path, 303)
-
+    url = f"{path}?{query}" if query else path
+    return RedirectResponse(status_code=200, headers={"HX-Redirect": url})
 
 async def _stats_ctx(sess: AsyncSession) -> dict:
     rows = await q.stats(sess)
@@ -364,3 +371,56 @@ async def users_toggle(uid: uuid.UUID, sess: AsyncSession = Depends(db_session),
         await audit(sess, user.username, "user_toggle", "user", uid, {"active": obj.is_active})
         await sess.commit()
     return back("/users", msg="Изменено")
+
+
+# --- Удаление WatchFolder (6 колонок) ---
+@router.post("/folders/{fid}/delete")
+async def folders_delete(fid: uuid.UUID, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+    obj = await sess.get(WatchFolder, fid)
+    if obj:
+        await sess.delete(obj)
+        await audit(sess, user.username, "folder_delete", "watch_folder", fid)
+        await sess.commit()
+    return HTMLResponse('<tr><td colspan="6" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Папка наблюдения удалена</td></tr>')
+
+# --- Удаление Preset (6 колонок) ---
+@router.post("/presets/{pid}/delete")
+async def presets_delete(pid: uuid.UUID, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+    obj = await sess.get(Preset, pid)
+    if obj:
+        await sess.delete(obj)
+        await audit(sess, user.username, "preset_delete", "preset", pid)
+        await sess.commit()
+    return HTMLResponse('<tr><td colspan="6" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Пресет удалён</td></tr>')
+
+# --- Удаление Schedule (7 колонок) ---
+@router.post("/schedules/{sid}/delete")
+async def schedules_delete(sid: uuid.UUID, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+    obj = await sess.get(Schedule, sid)
+    if obj:
+        await sess.delete(obj)
+        await audit(sess, user.username, "schedule_delete", "schedule", sid)
+        await sess.commit()
+    return HTMLResponse('<tr><td colspan="7" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Расписание удалено</td></tr>')
+
+# --- Удаление AppUser (5 колонок) ---
+@router.post("/users/{uid}/delete")
+async def users_delete(uid: uuid.UUID, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+    obj = await sess.get(AppUser, uid)
+    if obj and obj.id != user.id:
+        await sess.delete(obj)
+        await audit(sess, user.username, "user_delete", "user", uid)
+        await sess.commit()
+        return HTMLResponse('<tr><td colspan="5" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Пользователь удалён</td></tr>')
+    return HTMLResponse('<tr><td colspan="5" style="color: #dc2626; text-align: center; padding: 1rem;">✗ Нельзя удалить текущего пользователя</td></tr>')
+
+# --- Удаление Worker ---
+@router.post("/workers/{wid}/delete")
+async def workers_delete(wid: str, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+    obj = await sess.get(Worker, wid)
+    if obj:
+        await sess.delete(obj)
+        await audit(sess, user.username, "worker_delete", "worker", wid)
+        await sess.commit()
+    # В таблице workers.html ровно 9 колонок (ID, Тип, Состояние, CPU, GPU, Модель, NVENC, Heartbeat, Действия)
+    return HTMLResponse('<tr><td colspan="9" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Воркер удалён из реестра</td></tr>')

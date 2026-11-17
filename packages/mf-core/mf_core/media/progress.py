@@ -90,7 +90,7 @@ async def _graceful_stop(proc: asyncio.subprocess.Process, grace_s: int, stdin_q
         with contextlib.suppress(Exception):
             proc.stdin.write(b"q")
             await proc.stdin.drain()
-        with contextlib.suppress.TimeoutError):
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(proc.wait(), grace_s)
         return
     _signal_group(proc, signal.SIGTERM)
