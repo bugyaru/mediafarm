@@ -305,7 +305,9 @@ progress::-moz-progress-bar{background:linear-gradient(90deg,var(--accent),var(-
 #mf-drawer-body .mf-drawer-only{display:block}
 .mf-drawer-load{display:flex; gap:10px; align-items:center; color:var(--muted); padding:20px 0}
 .mf-drawer-load .mf-spin{display:inline-block}
-
+.mf-tail{margin-top:8px;border:1px solid #2a2f4a;border-radius:8px;padding:6px 10px;background:#0d1020}
+.mf-tail summary{cursor:pointer;color:#9aa4c0;font-size:.85rem}
+.mf-logpre{white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto;color:#cdd6f4;font-family:ui-monospace,monospace;font-size:.8rem;margin:8px 0 0}
 /* ── копирование ── */
 [data-copy]{cursor:copy; position:relative}
 [data-copy]:hover{border-color:var(--line-hi)!important; box-shadow:0 0 0 2px rgba(34,211,238,.2)}

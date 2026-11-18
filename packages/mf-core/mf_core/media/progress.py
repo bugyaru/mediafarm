@@ -146,7 +146,10 @@ async def run_media(
         nonlocal last_tick
         assert proc.stdout is not None
         async for raw in proc.stdout:
-            snap = parser.feed(raw.decode("utf-8", "replace"))
+            decoded = raw.decode("utf-8", "replace")
+            if fh:
+                fh.write(decoded)  # <--- ИЗМЕНЕНИЕ: запись stdout в лог
+            snap = parser.feed(decoded)
             if snap is None:
                 continue
             last_tick = time.monotonic()
@@ -179,9 +182,9 @@ async def run_media(
                 tg.create_task(read_stdout())
                 tg.create_task(read_stderr())
                 tg.create_task(watchdog())
-        except* CancelledByUser as eg:
+        except*CancelledByUser as eg:
             raise eg.exceptions[0] from None
-        except* StallError as eg:
+        except*StallError as eg:
             raise eg.exceptions[0] from None
     finally:
         if proc.returncode is None:

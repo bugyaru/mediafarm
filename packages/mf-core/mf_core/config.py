@@ -57,11 +57,11 @@ class Settings(BaseSettings):
     probe_analyze_s: int = 10
     ffmpeg_stop_grace_s: int = 10
     media_threads: int = 0          # 0 = авто (ffmpeg сам)
-    ffmpeg_path: str = "ffmpeg"
-    ffprobe_path: str = "ffprobe"
-    ffmbc_path: str = "ffmbc"
+    ffmpeg_path: str = "/usr/local/bin/ffmpeg"
+    ffprobe_path: str = "/usr/local/bin/ffprobe"
+    ffmbc_path: str = "/usr/local/bin/ffmbc"
     ffmbc_enabled: bool = True
-    ytdlp_path: str = "yt-dlp"
+    ytdlp_path: str = "/usr/local/bin/yt-dlp"
     ytdlp_timeout_s: int = 60
     egress_allow_domains: list[str] = Field(default_factory=list)   # [] = разрешить всё
     egress_block_private_ip: bool = True

@@ -314,6 +314,48 @@ async def patch_job(jid: uuid.UUID, patch: dict[str, Any] = Body(...),
     return _dump(job)
 
 
+@router.get("/jobs/{jid}/steps/{step_name}/log")
+async def get_step_log(
+        request: Request,
+        jid: uuid.UUID,
+        step_name: str,
+        sess: AsyncSession = Depends(db_session),
+        user=Depends(viewer)
+):
+    """Возвращает текст лог-файла для конкретного шага задачи."""
+    # 1. Проверяем существование задачи (для прав доступа)
+    await _get(sess, Job, jid)
+
+    # 2. Ищем шаг и его log_uri
+    step = (await sess.execute(
+        select(JobStep).where(JobStep.job_id == jid, JobStep.name == step_name)
+    )).scalar_one_or_none()
+
+    if not step or not step.log_uri:
+        raise HTTPException(404, "Лог для этого шага не найден или ещё не создан")
+
+    # 3. Читаем лог из хранилища
+    try:
+        await request.app.state.registry.ensure_fresh(sess)
+        be, rel = request.app.state.registry.resolve(step.log_uri)
+
+        # Ограничиваем размер читаемого лога (например, 5 МБ), чтобы не перегружать память UI
+        MAX_LOG_SIZE = 5 * 1024 * 1024
+        content_bytes = await be.read_range(rel, 0, MAX_LOG_SIZE)
+
+        # Декодируем с заменой некорректных символов
+        content_text = content_bytes.decode("utf-8", errors="replace")
+
+        # Если лог был обрезан, добавим уведомление
+        if len(content_bytes) == MAX_LOG_SIZE:
+            content_text += "\n\n--- [ЛОГ ОБРЕЗАН: превышен лимит 5 МБ] ---"
+
+        return Response(content=content_text, media_type="text/plain; charset=utf-8")
+
+    except Exception as e:
+        log.error("log_read_failed", job_id=str(jid), step=step_name, error=str(e))
+        raise HTTPException(500, f"Ошибка чтения лога из хранилища: {e}")
+
 # -------------------------------- schedules --------------------------------
 @router.get("/schedules")
 async def list_schedules(sess: AsyncSession = Depends(db_session), user=Depends(viewer)):

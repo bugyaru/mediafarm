@@ -274,29 +274,43 @@ class Worker:
 
     async def _on_error(self, job: q.ClaimedJob, ctx: JobContext | None, exc: Exception) -> None:
         err = classify(exc)
+        tail = list(getattr(err, "tail", None) or err.as_dict().get("tail") or [])
         log.error("job_failed", job_id=str(job.id), error_class=err.error_class,
-                  message=err.message, attempt=job.attempts)
+                  message=err.message, attempt=job.attempts, tail_lines=len(tail))
         log_uri = await self._upload_log(ctx)
+
         if err.retryable and job.attempts < job.max_attempts:
             backoff = exp_backoff(job.attempts)
             async with self.sf() as sess, sess.begin():
-                state = await q.retry(sess, job_id=job.id, worker_id=self.s.worker_id,
-                                      error={**err.as_dict(), "log_uri": log_uri},
+                state = await q.retry(sess, job_id=job.id, worker_id=s.worker_id,
+                                      error={**err.as_dict(), "tail": tail, "log_uri": log_uri},
                                       backoff_s=backoff)
                 await q.add_event(sess, job.id, "retry", err.message, "warning",
                                   {"backoff_s": backoff, "state": state})
+                # фиксируем хвост stderr в журнале событий — видно сразу в UI
+                if tail:
+                    await q.add_event(sess, job.id, "stderr", err.message, "error",
+                                      {"tail": tail[-30:]})
             JOBS_TOTAL.labels("retry", err.error_class).inc()
             return
+
         async with self.sf() as sess, sess.begin():
-            await q.complete(sess, job_id=job.id, worker_id=self.s.worker_id, state="failed",
-                             error={**err.as_dict(), "log_uri": log_uri},
+            await q.complete(sess, job_id=job.id, worker_id=s.worker_id, state="failed",
+                             error={**err.as_dict(), "tail": tail, "log_uri": log_uri},
                              progress=ctx.progress if ctx else {})
             if ctx and ctx.asset:
                 await sess.execute(text("UPDATE asset SET state='failed' WHERE id=:i"),
                                    {"i": ctx.asset["id"]})
-        JOBS_TOTAL.labels("failed", err.error_class).inc()
-        JOB_DURATION.labels(job.kind, "python", "failed").observe(0)
-        scratch.cleanup(scratch.job_dir(self.s, job.id))
+            # полный лог в журнал событий (последние 30 строк)
+            if tail:
+                await q.add_event(sess, job.id, "stderr", err.message, "error",
+                                  {"tail": tail[-30:], "log_uri": log_uri})
+            JOBS_TOTAL.labels("failed", err.error_class).inc()
+            JOB_DURATION.labels(job.kind, "python", "failed").observe(0)
+
+        # ВАЖНО: НЕ удаляем scratch-папку при падении — полный ytdlp.log/ffmpeg.log
+        # нужен для постмортема. Диск ограничен gc() с TTL=86400s в heartbeat-цикле.
+        # (было: scratch.cleanup(scratch.job_dir(self.s, job.id)))
 
     async def _upload_log(self, ctx: JobContext | None) -> str | None:
         if ctx is None:
@@ -304,7 +318,8 @@ class Worker:
         logs = list(ctx.workdir.glob("*.log"))
         if not logs:
             return None
-        target = ctx.job.params.get("log_storage")
+        # если в задаче явно не указан log_storage — берём дефолт из настроек воркера
+        target = ctx.job.params.get("log_storage") or getattr(self.s, "log_storage", None)
         if not target:
             return None
         try:

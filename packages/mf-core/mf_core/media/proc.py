@@ -82,6 +82,8 @@ async def run_streaming(
             line = raw.decode("utf-8", "replace").rstrip("\n")
             last_tick = time.monotonic()
             count += 1
+            if fh:
+                fh.write(line + "\n")  # <--- ИЗМЕНЕНИЕ: запись stdout в лог
             if on_line is not None:
                 res = on_line(line)
                 if asyncio.iscoroutine(res):
@@ -112,9 +114,9 @@ async def run_streaming(
                 tg.create_task(read_stdout())
                 tg.create_task(read_stderr())
                 tg.create_task(watchdog())
-        except* CancelledByUser as eg:
+        except*CancelledByUser as eg:
             raise eg.exceptions[0] from None
-        except* StallError as eg:
+        except*StallError as eg:
             raise eg.exceptions[0] from None
     finally:
         if proc.returncode is None:

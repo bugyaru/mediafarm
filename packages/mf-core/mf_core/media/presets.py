@@ -173,12 +173,19 @@ async def load_preset(
         return obj
     if not name:
         raise ConfigInvalidError("нужен preset_id или name")
-    sql = """
-        SELECT * FROM preset WHERE name = :n AND enabled
-          AND (:v::int IS NULL OR version = :v::int)
-        ORDER BY version DESC LIMIT 1
-    """
-    row = (await session.execute(text(sql), {"n": name, "v": version})).mappings().first()
+    if version is not None:
+        sql = """
+            SELECT * FROM preset WHERE name = :n AND enabled AND version = :v
+            ORDER BY version DESC LIMIT 1
+        """
+        params = {"n": name, "v": version}
+    else:
+        sql = """
+            SELECT * FROM preset WHERE name = :n AND enabled
+            ORDER BY version DESC LIMIT 1
+        """
+        params = {"n": name}
+    row = (await session.execute(text(sql), params)).mappings().first()
     if row is None:
         raise ConfigInvalidError(f"пресет {name!r} (v={version}) не найден")
     return await session.get(Preset, row["id"])  # type: ignore[return-value]

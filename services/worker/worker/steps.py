@@ -35,6 +35,49 @@ from worker.egress import check_url
 
 log = get_logger("mf.steps")
 
+
+async def _attach_log(ctx: JobContext, step_name: str, log_filename: str) -> None:
+    """Загружает лог-файл шага в хранилище и сохраняет URI в БД."""
+    log_path = ctx.workdir / log_filename
+    if not log_path.exists() or log_path.stat().st_size == 0:
+        return
+
+    # 1. Ищем хранилище для сохранения логов (предпочтительно то, куда идет publish)
+    storage_name = None
+    for s in ctx.spec.steps:
+        if s.id == "publish" and getattr(s, "storage", None):
+            storage_name = s.storage
+            break
+
+    # 2. Если publish не настроен, берем любое доступное включенное хранилище
+    if not storage_name:
+        for name, row in ctx.registry._by_name.items():
+            if row.enabled:
+                storage_name = name
+                break
+
+    if not storage_name:
+        log.warning("log_attach_skipped", step=step_name, reason="no_enabled_storage")
+        return
+
+    try:
+        be = ctx.registry.by_name(storage_name)
+        # Сохраняем логи в скрытую папку .logs/<job_id>/
+        rel_path = f".logs/{ctx.job.id}/{step_name}.log"
+
+        # Загружаем файл в хранилище
+        entry = await be.upload(log_path, rel_path, overwrite=True)
+
+        # Обновляем запись в БД
+        async with ctx.sf() as sess, sess.begin():
+            await sess.execute(
+                text("UPDATE job_step SET log_uri = :uri WHERE job_id = :jid AND name = :name"),
+                {"uri": entry.uri, "jid": ctx.job.id, "name": step_name}
+            )
+        log.info("log_attached", step=step_name, uri=entry.uri)
+    except Exception as e:
+        log.warning("log_attach_failed", step=step_name, error=str(e))
+
 DIRECT_EXT = (".m3u8", ".mpd", ".mp4", ".mkv", ".mov", ".ts", ".m4v", ".webm", ".mp3", ".m4a")
 DIRECT_SCHEMES = ("rtmp", "rtmps", "rtsp", "srt", "mms", "mmsh")
 CONTAINER_EXT = {"mp4": "mp4", "mov": "mov", "mkv": "mkv", "matroska": "mkv", "mxf": "mxf",
@@ -63,7 +106,7 @@ async def _http_download(ctx: JobContext, url: str, dst: Path) -> Path:
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
         async with client.stream("GET", url, headers=headers) as r:
             if offset and r.status_code == 200:
-                offset = 0                       # сервер проигнорировал Range
+                offset = 0  # сервер проигнорировал Range
             r.raise_for_status()
             total = int(r.headers.get("content-length") or 0) + offset
             scratch.ensure_space(ctx.s, ctx.workdir, total)
@@ -140,7 +183,10 @@ async def acquire(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
 async def probe(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     if not ctx.input:
         raise ConfigInvalidError("probe: нет входа (шаг acquire не выполнен)")
-    info = await ffprobe(ctx.input, settings=ctx.s)
+
+    # <--- ИЗМЕНЕНИЕ: передача log_file в ffprobe --->
+    info = await ffprobe(ctx.input, settings=ctx.s, log_file=str(ctx.workdir / "probe.log"))
+
     if not info.has_video and not info.has_audio:
         raise SourceInvalidError("в источнике нет медиапотоков", uri=ctx.input)
 
@@ -165,6 +211,7 @@ async def probe(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
                 text("UPDATE asset SET probe = CAST(:p AS jsonb), updated_at = now() WHERE id = :i"),
                 {"p": json.dumps(info.to_dict(), ensure_ascii=False), "i": ctx.asset["id"]},
             )
+    await _attach_log(ctx, "probe", "probe.log")
     return {"probe": info.to_dict(), "idet": idet}
 
 
@@ -177,7 +224,7 @@ async def transcode(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     out = ctx.workdir / f"output.{ext}"
     out.unlink(missing_ok=True)
     scratch.ensure_space(ctx.s, ctx.workdir, (out.stat().st_size if out.exists() else 0)
-                         + int((ctx.info.size or 0) * 1.5) + 64 * 1024**2)
+                         + int((ctx.info.size or 0) * 1.5) + 64 * 1024 ** 2)
 
     engine = step.engine or "ffmpeg"
     if engine == "ffmbc":
@@ -223,6 +270,7 @@ async def transcode(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
         raise SourceInvalidError("ffmpeg не создал результат", path=str(out))
     ctx.metrics.update({"engine": "ffmpeg", "hw": "cuda" if dec.use_cuda else "cpu",
                         "hw_reason": dec.reason, "codec": codec, "speed": res.avg_speed})
+    await _attach_log(ctx, "transcode", "transcode.log")
     return {"path": str(out), "size": out.stat().st_size, "engine": "ffmpeg",
             "hw": dec.use_cuda, "codec": codec, "speed": res.avg_speed}
 
@@ -240,10 +288,13 @@ async def thumbnail(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
         dst = ctx.workdir / f"thumb_{i:02d}.jpg"
         cmd = build_thumbnail(step, ctx.info, src=ctx.input, dst=str(dst),
                               at_s=min(at_s, max(0.0, duration - 0.1)), settings=ctx.s)
+
+        # <--- ИЗМЕНЕНИЕ: передача log_file в run_media --->
         await run_media(cmd, settings=ctx.s, engine="ffmpeg", codec="mjpeg",
-                        stall_timeout_s=60)
+                        stall_timeout_s=60, log_file=str(ctx.workdir / f"thumbnail_{i:02d}.log"))
         if dst.exists():
             paths.append(str(dst))
+    await _attach_log(ctx, "thumbnail", "thumbnail_00.log")
     return {"paths": paths}
 
 
@@ -328,6 +379,7 @@ async def notify(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
         r.raise_for_status()
     return {"status": r.status_code}
 
+
 async def capture(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     from mf_core.media.ffmpeg import build_capture
     src = ctx.input or ctx.job.params.get("url")
@@ -338,10 +390,15 @@ async def capture(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     cmd = build_capture(src=src, dst=str(out), duration_s=extra.get("duration_s"),
                         copy=bool(extra.get("copy", True)),
                         segment_s=extra.get("segment_s"), settings=ctx.s)
+
+    # <--- ИЗМЕНЕНИЕ: передача log_file в run_media --->
     res = await run_media(cmd, duration_s=extra.get("duration_s"), on_progress=ctx.on_progress,
-                          cancel=ctx.cancel, settings=ctx.s, engine="ffmpeg", codec="copy")
+                          cancel=ctx.cancel, settings=ctx.s, engine="ffmpeg", codec="copy",
+                          log_file=str(ctx.workdir / "capture.log"))
     ctx.metrics.update({"engine": "ffmpeg", "hw": "cpu", "speed": res.avg_speed})
+    await _attach_log(ctx, "capture", "capture.log")
     return {"path": str(out), "size": out.stat().st_size, "engine": "ffmpeg", "hw": False}
+
 
 HANDLERS = {
     "acquire": acquire, "probe": probe, "transcode": transcode, "thumbnail": thumbnail,

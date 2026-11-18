@@ -13,6 +13,7 @@ x-env: &env
   MF_SECRET_IN_SMB_PASSWORD: ${SMB_PASSWORD:-1520Gub@55}
   MF_SECRET_OUT_S3_ACCESS_KEY: ${S3_ACCESS_KEY:-mfadmin}
   MF_SECRET_OUT_S3_SECRET_KEY: ${S3_SECRET_KEY:-mfadmin123}
+  
 
 services:
   postgres:
@@ -51,6 +52,7 @@ services:
     platform: linux/amd64
     environment: *env
     ports: ["8080:8080"]
+    volumes: ["./data/in:/data/in", "./data/out:/data/out"]
     depends_on: {migrate: {condition: service_completed_successfully}}
 
   watcher:
@@ -80,10 +82,15 @@ services:
     environment:
       <<: *env
       MF_KIND: cpu
-      MF_CPU_SLOTS: "2"
+      MF_CPU_SLOTS: "4"
       MF_GPU_SLOTS: "0"
       MF_FFMBC_ENABLED: "true"
-    volumes: ["./data:/data", "scratch-cpu:/scratch"]
+      MF_FFMPEG_PATH: /usr/local/bin/ffmpeg
+      MF_FFPROBE_PATH: /usr/local/bin/ffprobe
+      MF_FFMBC_PATH: /usr/local/bin/ffmbc
+      MF_YTDL_PATH: /usr/local/bin/yt-dlp
+      MF_LOG_STORAGE: out
+    volumes: ["./data/in:/data/in", "./data/out:/data/out", "./data/tmp:/scratch"]
     depends_on: {migrate: {condition: service_completed_successfully}}
 
   minio:

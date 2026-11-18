@@ -1,5 +1,7 @@
 {% extends "base.html" %}{% block title %}Задача {{ job.id|string|truncate(8, True, '') }} · MediaFarm{% endblock %}
+
 {% block content %}
+
 <div class="mf-pagehead">
     <div>
         <h1>Задача <span class="mf-mono">{{ job.id }}</span></h1>
@@ -35,14 +37,24 @@
         {% if job.concurrency_key %}<span class="mf-meta">ключ: <b>{{ job.concurrency_key }}</b></span>{% endif %}
         {% if asset %}<span class="mf-meta">ассет: <a href="/assets?q={{ asset.uri|urlencode }}"><b>{{ asset.uri|truncate(48) }}</b></a></span>{% endif %}
     </div>
+
     <div style="margin-top:12px">
-        <span class="mf-prog"><progress max="100" value="{{ job.progress.get('pct') or 0 }}"></progress>
-        <span class="pct">{{ '%.1f'|format(job.progress.get('pct') or 0) }}%</span></span>
+    <span class="mf-prog"><progress max="100" value="{{ job.progress.get('pct') or 0 }}"></progress>
+      <span class="pct">{{ '%.1f'|format(job.progress.get('pct') or 0) }}%</span></span>
         <span class="mf-muted mf-small">шаг: {{ job.progress.get('step','—') }}{% if job.progress.get('speed') %} · {{ job.progress.get('speed') }}{% endif %}</span>
     </div>
+
     {% if job.error %}
     <pre class="mf-errtext">{{ job.error.get('class','error') }}: {{ job.error.get('message','') }}{% if job.error.get('detail') %}
 {{ job.error.get('detail') }}{% endif %}</pre>
+    {% if job.error.get('tail') %}
+    <details class="mf-tail" open>
+        <summary>📜 Лог воркера — stderr ({{ job.error.get('tail')|length }} строк){% if job.error.get('log_uri') %} · полный файл: <code>{{ job.error.get('log_uri') }}</code>{% endif %}</summary>
+        <pre class="mf-logpre">{{ job.error.get('tail')|join('\n') }}</pre>
+    </details>
+    {% elif job.error.get('log_uri') %}
+    <div class="mf-small mf-muted">полный лог сохранён в хранилище: <code data-copy="{{ job.error.get('log_uri') }}">{{ job.error.get('log_uri') }}</code></div>
+    {% endif %}
     {% endif %}
 </div>
 
@@ -58,15 +70,23 @@
                 <span class="mf-st s-{{ s.state }}">{{ s.state }}</span>
                 {% if s.engine %}<span class="mf-kind k-probe">{{ s.engine }}</span>{% endif %}
                 <span class="tm">
-                {% if s.started_at %}{{ s.started_at.strftime('%H:%M:%S') }}{% endif %}
-                {% if s.finished_at %} → {{ s.finished_at.strftime('%H:%M:%S') }}{% endif %}
+              {% if s.started_at %}{{ s.started_at.strftime('%H:%M:%S') }}{% endif %}
+              {% if s.finished_at %} → {{ s.finished_at.strftime('%H:%M:%S') }}{% endif %}
             </span>
             </div>
             {% if s.metrics %}
             <div class="mf-metas">{% for k, v in s.metrics.items() %}{% if loop.index <= 6 %}<span class="mf-meta">{{ k }}: <b>{{ v }}</b></span>{% endif %}{% endfor %}</div>
             {% endif %}
             {% if s.cmdline %}<pre class="cmd" data-copy="{{ s.cmdline }}" title="Клик — скопировать">{{ s.cmdline }}</pre>{% endif %}
-            {% if s.error %}<pre class="mf-errtext">{{ s.error.get('class','error') }}: {{ s.error.get('message','') }}</pre>{% endif %}
+            {% if s.error %}
+            <pre class="mf-errtext">{{ s.error.get('class','error') }}: {{ s.error.get('message','') }}</pre>
+            {% if s.error.get('tail') %}
+            <details class="mf-tail">
+                <summary>📜 Лог воркера — stderr шага ({{ s.error.get('tail')|length }} строк)</summary>
+                <pre class="mf-logpre">{{ s.error.get('tail')|join('\n') }}</pre>
+            </details>
+            {% endif %}
+            {% endif %}
             {% if s.log_uri %}<div class="mf-small mf-muted">лог: <code data-copy="{{ s.log_uri }}">{{ s.log_uri }}</code></div>{% endif %}
         </li>
         {% endfor %}
@@ -121,4 +141,5 @@
     {% if job.error %}<pre class="mf-errtext">{{ job.error.get('class','error') }}: {{ job.error.get('message','') }}</pre>{% endif %}
     <div style="margin-top:16px"><a class="mf-btn mf-btn-primary" href="/jobs/{{ job.id }}">Открыть полностью ↗</a></div>
 </section>
+
 {% endblock %}

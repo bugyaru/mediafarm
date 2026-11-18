@@ -188,7 +188,7 @@ def probe_input_args(uri: str, s: Settings | None = None) -> list[str]:
 
 async def ffprobe(
         uri: str, *, settings: Settings | None = None, extra: list[str] | None = None,
-        timeout_s: int | None = None,
+        timeout_s: int | None = None, log_file: str | None = None,  # <--- ИЗМЕНЕНИЕ: добавлен параметр
 ) -> MediaInfo:
     s = settings or get_settings()
     cmd = [s.ffprobe_path, "-hide_banner", "-v", "error", "-print_format", "json",
@@ -203,6 +203,15 @@ async def ffprobe(
     except TimeoutError:
         _kill(proc)
         raise TransientNetworkError(f"ffprobe timeout {uri}", uri=uri) from None
+
+    # <--- ИЗМЕНЕНИЕ: запись вывода ffprobe в лог-файл --->
+    if log_file:
+        with open(log_file, "a", encoding="utf-8") as fh:
+            fh.write("--- FFPROBE STDERR ---\n")
+            fh.write(err.decode("utf-8", "replace"))
+            fh.write("--- FFPROBE STDOUT (truncated) ---\n")
+            fh.write(out.decode("utf-8", "replace")[:2000] + "\n")
+
     if proc.returncode != 0:
         raise classify_ffmpeg(proc.returncode or 1, err.decode("utf-8", "replace").splitlines())
     try:

@@ -19,6 +19,8 @@ RUN if [ "$INSTALL_FFMBC" = "1" ]; then \
       chmod +x /usr/local/bin/ffmbc ; \
     fi
 
+FROM denoland/deno:debian AS deno_source
+
 # ---- CPU media base ----
 FROM debian:bookworm-slim AS cpu
 ENV DEBIAN_FRONTEND=noninteractive
@@ -26,15 +28,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       curl xz-utils ca-certificates libnuma1 libxml2 \
     python3 python3-minimal \
 && rm -rf /var/lib/apt/lists/*
+
 ARG FFMPEG_BUILD=ffmpeg-master-latest-linux64-gpl
 RUN curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${FFMPEG_BUILD}.tar.xz" \
     | tar -xJ --strip-components=2 -C /usr/local/bin --wildcards '*/bin/ff*'
 RUN curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
       -o /usr/local/bin/yt-dlp && chmod +x /usr/local/bin/yt-dlp
+COPY --from=deno_source /usr/bin/deno /usr/local/bin/deno
 COPY --from=ffmbc-build /usr/local/bin/ffmbc /usr/local/bin/ffmbc
 COPY --from=ffmbc-build /usr/lib/x86_64-linux-gnu/libx264.so.* /usr/lib/x86_64-linux-gnu/
 COPY --from=ffmbc-build /usr/lib/x86_64-linux-gnu/libmp3lame.so.* /usr/lib/x86_64-linux-gnu/
-RUN ffmpeg -version && ffprobe -version && yt-dlp --version && ffmbc -version
+RUN ffmpeg -version && ffprobe -version && yt-dlp --version && ffmbc -version && deno --version
 
 # ---- CUDA media base: тот же ffmpeg, но с проверкой NVENC/CUDA-фильтров ----
 FROM cpu AS cuda

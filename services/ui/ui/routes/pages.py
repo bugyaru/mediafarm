@@ -4,13 +4,10 @@ import json
 import time
 import uuid
 from html import escape
-
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from mf_core import queue as q
 from mf_core.errors import ConfigInvalidError
 from mf_core.media.presets import BUILTIN_PRESETS, seed_presets, validate_spec
@@ -27,7 +24,6 @@ router = APIRouter()
 op = require_role("operator")
 admin = require_role("admin")
 
-
 def back(request: Request, path: str, msg: str = "", err: str = "") -> Response:
     """PRG для обычных форм; для HTMX — HX-Redirect (обрабатывается даже при hx-swap='none')."""
     from urllib.parse import urlencode
@@ -37,7 +33,6 @@ def back(request: Request, path: str, msg: str = "", err: str = "") -> Response:
         return Response(status_code=200, headers={"HX-Redirect": url})
     return RedirectResponse(url, status_code=303)
 
-
 # ------------------------- хранилища: статусы проверок -------------------------
 
 def _st_tests(request: Request) -> dict:
@@ -46,17 +41,14 @@ def _st_tests(request: Request) -> dict:
         request.app.state.storage_tests = {}
     return request.app.state.storage_tests
 
-
 def _st_flash(kind: str, text: str) -> str:
     return (f'<div id="st-flash" hx-swap-oob="outerHTML" class="st-flash {kind}" role="status">'
             f'{"✓" if kind == "ok" else "✕"} {escape(text)}</div>')
-
 
 async def _st_table(request: Request, sess: AsyncSession, oob: bool = True) -> str:
     rows = (await sess.execute(select(Storage).order_by(Storage.name))).scalars().all()
     return templates.get_template("_storages_table.html").render(
         storages=rows, tests=_st_tests(request), oob=oob)
-
 
 def _storage_error_hint(err: str) -> str:
     e = err.lower()
@@ -77,7 +69,6 @@ def _storage_error_hint(err: str) -> str:
     if any(s in e for s in ("no such file", "not a directory", "permission denied")):
         return "проверьте mount_path и права доступа"
     return ""
-
 
 async def _stats_ctx(sess: AsyncSession) -> dict:
     rows = await q.stats(sess)
@@ -183,7 +174,7 @@ async def storages_create(request: Request, sess: AsyncSession = Depends(db_sess
         data = parse_form(await request.form(), json_fields=("options",),
                           bool_fields=("read_only", "enabled"))
         data.setdefault("enabled", True)
-        for k in ("mount_path", "secret_ref"):      # пустые строки -> NULL
+        for k in ("mount_path", "secret_ref"):  # пустые строки -> NULL
             if data.get(k) == "":
                 data[k] = None
         if await sess.scalar(select(func.count()).select_from(Storage)
@@ -232,7 +223,6 @@ async def storages_test(request: Request, sid: uuid.UUID, sess: AsyncSession = D
     await sess.commit()
     resp = render(request, "_storage_test.html", user, result=result, storage=obj,
                   extras=extras, err_text=err_text, hint=hint)
-    # команда фронтенду подкрасить строку: зелёный (ok) / красный (err)
     resp.headers["HX-Trigger"] = json.dumps({"storageTested": {
         "id": str(sid), "ok": bool(result["ok"]),
         "latency_ms": result["latency_ms"], "checked_at": result["checked_at"]}})
@@ -256,7 +246,6 @@ async def storages_delete(request: Request, sid: uuid.UUID, sess: AsyncSession =
     return HTMLResponse(await _st_table(request, sess)
                         + _st_flash("ok", f"Хранилище «{name}» удалено" if name else "Хранилище уже удалено"))
 
-
 @router.post("/storages/{sid}/toggle")
 async def storages_toggle(request: Request, sid: uuid.UUID, sess: AsyncSession = Depends(db_session), user=Depends(op)):
     obj = await sess.get(Storage, sid)
@@ -265,9 +254,7 @@ async def storages_toggle(request: Request, sid: uuid.UUID, sess: AsyncSession =
         await audit(sess, user.username, "storage_toggle", "storage", sid, {"enabled": obj.enabled})
         await sess.commit()
         await request.app.state.registry.refresh(sess)
-    # Возвращаем обновлённую строку для мгновенного обновления в таблице
-    return templates.TemplateResponse(request, "_storage_row.html", {"s": obj, "tests": _st_tests(request)})
-
+        return templates.TemplateResponse(request, "_storage_row.html", {"s": obj, "tests": _st_tests(request)})
 
 @router.get("/storages/{sid}/edit")
 async def storages_edit_form(request: Request, sid: uuid.UUID, sess: AsyncSession = Depends(db_session),
@@ -277,35 +264,28 @@ async def storages_edit_form(request: Request, sid: uuid.UUID, sess: AsyncSessio
         raise HTTPException(404, "Хранилище не найдено")
     return render(request, "_storage_edit_form.html", user, storage=obj)
 
-
 @router.post("/storages/{sid}/edit")
 async def storages_edit_save(request: Request, sid: uuid.UUID, sess: AsyncSession = Depends(db_session),
                              user=Depends(op)):
     obj = await sess.get(Storage, sid)
     if not obj:
         raise HTTPException(404, "Хранилище не найдено")
-
     data = parse_form(await request.form(), json_fields=("options",), bool_fields=("read_only", "enabled"))
     # Нормализация пустых строк в None
     for k in ("mount_path", "secret_ref"):
         if data.get(k) == "":
             data[k] = None
-
     for k, v in data.items():
         if k in Storage.__table__.columns and k not in ("id", "created_at", "updated_at"):
             setattr(obj, k, v)
-
     await audit(sess, user.username, "storage_update", "storage", sid, data)
     await sess.commit()
     await request.app.state.registry.refresh(sess)
-
-    # Возвращаем скрипт для закрытия drawer и обновления строки в таблице
     return HTMLResponse(
         f'<div hx-swap-oob="true" id="st-flash" class="st-flash ok">✓ Хранилище «{obj.name}» обновлено</div>'
         f'<script>document.querySelector("[data-drawer-close]").click(); '
         f'htmx.ajax("GET", "/storages/{sid}/row", {{target: "#row-{sid}", swap: "outerHTML"}});</script>'
     )
-
 
 @router.get("/storages/{sid}/row")
 async def storages_row(request: Request, sid: uuid.UUID, sess: AsyncSession = Depends(db_session),
@@ -314,6 +294,7 @@ async def storages_row(request: Request, sid: uuid.UUID, sess: AsyncSession = De
     if not obj:
         return HTMLResponse('<tr><td colspan="6" class="mf-empty">Хранилище удалено</td></tr>')
     return templates.TemplateResponse(request, "_storage_row.html", {"s": obj, "tests": _st_tests(request)})
+
 # --------------------------------- folders ---------------------------------
 
 @router.get("/folders")
@@ -418,6 +399,15 @@ async def presets_seed(request: Request, sess: AsyncSession = Depends(db_session
     await sess.commit()
     return back(request, "/presets", msg=f"Добавлено пресетов: {created}")
 
+@router.post("/presets/{pid}/toggle")
+async def presets_toggle(request: Request, pid: uuid.UUID, sess: AsyncSession = Depends(db_session), user=Depends(op)):
+    obj = await sess.get(Preset, pid)
+    if obj:
+        obj.enabled = not obj.enabled
+        await audit(sess, user.username, "preset_toggle", "preset", pid, {"enabled": obj.enabled})
+        await sess.commit()
+    return back(request, "/presets", msg="Статус пресета изменён")
+
 # -------------------------------- schedules --------------------------------
 
 @router.get("/schedules")
@@ -512,8 +502,9 @@ async def users_toggle(request: Request, uid: uuid.UUID, sess: AsyncSession = De
     return back(request, "/users", msg="Изменено")
 
 # --- Удаление WatchFolder (6 колонок) ---
+
 @router.post("/folders/{fid}/delete")
-async def folders_delete(fid: uuid.UUID, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+async def folders_delete(fid: uuid.UUID, sess: AsyncSession = Depends(db_session), user=Depends(admin)):
     obj = await sess.get(WatchFolder, fid)
     if obj:
         await sess.delete(obj)
@@ -522,8 +513,9 @@ async def folders_delete(fid: uuid.UUID, sess: AsyncSession = Depends(db_session
     return HTMLResponse('<tr><td colspan="6" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Папка наблюдения удалена</td></tr>')
 
 # --- Удаление Preset (6 колонок) ---
+
 @router.post("/presets/{pid}/delete")
-async def presets_delete(pid: uuid.UUID, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+async def presets_delete(pid: uuid.UUID, sess: AsyncSession = Depends(db_session), user=Depends(admin)):
     obj = await sess.get(Preset, pid)
     if obj:
         await sess.delete(obj)
@@ -532,8 +524,9 @@ async def presets_delete(pid: uuid.UUID, sess: AsyncSession = Depends(db_session
     return HTMLResponse('<tr><td colspan="6" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Пресет удалён</td></tr>')
 
 # --- Удаление Schedule (7 колонок) ---
+
 @router.post("/schedules/{sid}/delete")
-async def schedules_delete(sid: uuid.UUID, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+async def schedules_delete(sid: uuid.UUID, sess: AsyncSession = Depends(db_session), user=Depends(admin)):
     obj = await sess.get(Schedule, sid)
     if obj:
         await sess.delete(obj)
@@ -542,23 +535,24 @@ async def schedules_delete(sid: uuid.UUID, sess: AsyncSession = Depends(db_sessi
     return HTMLResponse('<tr><td colspan="7" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Расписание удалено</td></tr>')
 
 # --- Удаление AppUser (5 колонок) ---
+
 @router.post("/users/{uid}/delete")
-async def users_delete(uid: uuid.UUID, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+async def users_delete(uid: uuid.UUID, sess: AsyncSession = Depends(db_session), user=Depends(admin)):
     obj = await sess.get(AppUser, uid)
     if obj and obj.id != user.id:
         await sess.delete(obj)
         await audit(sess, user.username, "user_delete", "user", uid)
         await sess.commit()
-        return HTMLResponse('<tr><td colspan="5" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Пользователь удалён</td></tr>')
+    return HTMLResponse('<tr><td colspan="5" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Пользователь удалён</td></tr>')
     return HTMLResponse('<tr><td colspan="5" style="color: #dc2626; text-align: center; padding: 1rem;">✗ Нельзя удалить текущего пользователя</td></tr>')
 
 # --- Удаление Worker ---
+
 @router.post("/workers/{wid}/delete")
-async def workers_delete(wid: str, sess: AsyncSession = Depends(db_session), user = Depends(admin)):
+async def workers_delete(wid: str, sess: AsyncSession = Depends(db_session), user=Depends(admin)):
     obj = await sess.get(Worker, wid)
     if obj:
         await sess.delete(obj)
         await audit(sess, user.username, "worker_delete", "worker", wid)
         await sess.commit()
-    # В таблице workers.html ровно 9 колонок (ID, Тип, Состояние, CPU, GPU, Модель, NVENC, Heartbeat, Действия)
     return HTMLResponse('<tr><td colspan="9" style="color: #16a34a; text-align: center; padding: 1rem;">✓ Воркер удалён из реестра</td></tr>')

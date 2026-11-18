@@ -1,9 +1,12 @@
-{% extends "base.html" %}{% block title %}Пресеты · MediaFarm{% endblock %}
+{% extends "base.html" %}
+{% block title %}Пресеты · MediaFarm{% endblock %}
+
 {% block content %}
 <div class="mf-pagehead">
     <div><h1>Пресеты</h1><p class="mf-sub">Спецификации конвейеров: шаги, кодеки, GPU-требования. Проверка валидирует spec без сохранения.</p></div>
     <form hx-post="/presets/seed" hx-swap="none"><button class="mf-btn mf-btn-ok">Загрузить встроенные</button></form>
 </div>
+
 {% if builtins %}
 <div class="mf-chips" style="margin-bottom:16px">
     <span class="mf-muted mf-small">встроенные:</span>
@@ -22,9 +25,16 @@
             <td><span class="mf-kind {{ 'mf-gpu' if p.spec.get('requires_gpu') else 'mf-cpu' }}">{{ 'GPU' if p.spec.get('requires_gpu') else 'CPU' }}</span></td>
             <td class="mf-small">{% for s in p.spec.get('steps', []) %}<span class="mf-chip" style="margin:2px">{{ s.get('id','?') }}</span>{% endfor %}</td>
             <td><span class="mf-st {{ 's-online' if p.enabled else 's-cancelled' }}">{{ 'да' if p.enabled else 'нет' }}</span></td>
-            <td class="mf-act">
+            <td class="mf-act" style="display: flex; gap: 4px;">
+                <form hx-post="/presets/{{ p.id }}/toggle" hx-swap="none">
+                    <button class="mf-btn mf-btn-sm {{ 'mf-btn-ok' if not p.enabled else 'mf-btn-warn' }}" title="{{ 'Включить' if not p.enabled else 'Выключить' }}">
+                        {{ 'Вкл' if not p.enabled else 'Выкл' }}
+                    </button>
+                </form>
                 {% if user.role == 'admin' %}
-                <form hx-post="/presets/{{ p.id }}/delete" hx-target="closest tr" hx-swap="outerHTML" hx-confirm="Удалить пресет «{{ p.name }}»?"><button class="mf-btn mf-btn-sm mf-btn-danger">✕</button></form>
+                <form hx-post="/presets/{{ p.id }}/delete" hx-target="closest tr" hx-swap="outerHTML" hx-confirm="Удалить пресет «{{ p.name }}»?">
+                    <button class="mf-btn mf-btn-sm mf-btn-danger" title="Удалить">✕</button>
+                </form>
                 {% endif %}
             </td>
         </tr>
