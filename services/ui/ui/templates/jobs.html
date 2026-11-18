@@ -1,29 +1,45 @@
-{% extends "base.html" %}{% block content %}
-<h1>Задачи</h1>
-<div class="card">
-    <form hx-post="/jobs" hx-swap="none" class="row">
-        <input name="url" placeholder="https://… (web-стрим или файл)">
-        <input name="input_uri" placeholder="smb://… / s3://… / file://…">
-        <select name="preset_name">{% for p in presets %}<option>{{ p.name }}</option>{% endfor %}</select>
-        <select name="kind"><option>transcode</option><option>capture</option><option>fetch</option><option>probe</option></select>
-        <input name="priority" type="number" value="100" min="0" max="1000" style="width:6rem">
-        <button>Поставить задачу</button>
+{% extends "base.html" %}{% block title %}Задачи · MediaFarm{% endblock %}
+{% block content %}
+<div class="mf-pagehead">
+    <div><h1>Задачи</h1><p class="mf-sub">Очередь транскодирования, захвата и пробы. Строки обновляются по WebSocket в реальном времени.</p></div>
+    <form method="get" class="mf-row">
+        <select name="state" onchange="this.form.submit()" aria-label="Фильтр по состоянию">
+            <option value="">все состояния</option>
+            {% for s in ['queued','running','succeeded','failed','cancelled','retry_scheduled'] %}
+            <option value="{{ s }}" {% if state==s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
     </form>
 </div>
-<form method="get" class="row">
-    <select name="state" onchange="this.form.submit()">
-        <option value="">все</option>
-        {% for s in ['queued','running','succeeded','failed','cancelled'] %}
-        <option value="{{ s }}" {% if state==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
-    </select>
-</form>
+
+<div class="card">
+    <h3>Поставить задачу</h3>
+    <form hx-post="/jobs" hx-swap="none" class="grid">
+        <label class="mf-wide">URL источника<input name="url" placeholder="https://… (web-стрим или файл)"></label>
+        <label class="mf-wide">Input URI<input name="input_uri" placeholder="smb://… / s3://… / file://…"></label>
+        <label>Пресет<select name="preset_name">{% for p in presets %}<option>{{ p.name }}</option>{% endfor %}</select></label>
+        <label>Тип<select name="kind"><option>transcode</option><option>capture</option><option>fetch</option><option>probe</option></select></label>
+        <label>Приоритет<input name="priority" type="number" value="100" min="0" max="1000"></label>
+        <div class="mf-submit"><button class="mf-btn mf-btn-primary">Поставить задачу</button></div>
+    </form>
+</div>
+
+<div class="mf-toolbar">
+    <button type="button" id="mf-cancel-visible" class="mf-btn mf-btn-danger mf-btn-sm">Отменить видимые активные</button>
+    <span class="mf-muted mf-small">состояние: <b>{{ state or 'все' }}</b></span>
+</div>
+
 <div hx-ext="ws" ws-connect="/ws/jobs{% if state %}?state={{ state }}{% endif %}">
-    <table>
-        <thead><tr><th>ID</th><th>Тип</th><th>Состояние</th><th>Шаг</th><th>Прогресс</th>
-            <th>Speed</th><th>Попытки</th><th>Воркер</th><th>Ресурс</th></tr></thead>
-        <tbody id="jobs-body">
-        {% for job in jobs %}{% include "_job_row.html" %}{% endfor %}
-        </tbody>
-    </table>
+    <div class="mf-table-wrap mf-enhance" id="jobs-wrap">
+        <table class="mf-table">
+            <thead><tr><th>ID</th><th>Тип</th><th>Состояние</th><th>Шаг</th><th>Прогресс</th>
+                <th>Speed</th><th>Попытки</th><th>Воркер</th><th>Ресурс</th></tr></thead>
+            <tbody id="jobs-body">
+            {% for job in jobs %}{% include "_job_row.html" %}{% else %}
+            <tr><td colspan="9" class="mf-empty">Задач нет — поставьте первую в форме выше.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endblock %}

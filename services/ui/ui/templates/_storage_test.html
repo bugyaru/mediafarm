@@ -1,6 +1,23 @@
-<!-- _storage_test.html -->
-<div class="flash {{ 'ok' if result.ok else 'err' }}">
-    {% if result.ok %}OK · {{ result.latency_ms }} ms · записываемое: {{ result.writable }}
-    · объектов: {{ result.entries|length }}
-    {% else %}{{ result.error }}{% endif %}
+{% set ok = result.get('ok') %}
+<div class="st-result {{ 'ok' if ok else 'err' }} st-in">
+    <div class="st-ico" aria-hidden="true">{{ '✓' if ok else '✕' }}</div>
+    <div class="st-body">
+        <div class="st-title">
+            {{ 'Хранилище доступно' if ok else 'Проверка не пройдена' }}
+            <span class="st-title-name">{{ storage.name }}</span>
+        </div>
+        <div class="st-metas">
+            {% if result.get('latency_ms') is not none %}
+            <span class="st-meta">отклик: <b>{{ '%.0f'|format(result.get('latency_ms')) }} ms</b></span>
+            {% endif %}
+            {% if result.get('checked_at') %}<span class="st-meta">проверено: <b>{{ result.get('checked_at') }}</b></span>{% endif %}
+            <span class="st-meta">тип: <b>{{ storage.kind }}</b></span>
+            <span class="st-meta st-meta-uri">{{ storage.base_uri }}</span>
+            {% for k, v in extras %}<span class="st-meta">{{ k }}: <b>{{ v }}</b></span>{% endfor %}
+        </div>
+        {% if not ok %}
+        <pre class="st-err">{{ err_text }}</pre>
+        {% if hint %}<div class="st-hint">→ {{ hint }}</div>{% endif %}
+        {% endif %}
+    </div>
 </div>

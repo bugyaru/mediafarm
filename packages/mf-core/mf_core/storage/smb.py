@@ -35,10 +35,10 @@ class SmbBackend(Backend):
         if not self.host or not self.share:
             raise StorageError(f"некорректный SMB URI: {row.base_uri}")
 
-    def _ensure_session(self) -> None:
+    def _ensure_session(self, *, force: bool = False) -> None:
         key = (self.host, self.port, self.creds.get("username", ""))
         with _LOCK:
-            if key in _SESSIONS:
+            if not force and key in _SESSIONS:
                 return
             kwargs: dict = {
                 "port": self.port,
@@ -47,13 +47,53 @@ class SmbBackend(Backend):
                 "password": self.creds.get("password") or None,
             }
             if self.creds.get("domain"):
-                kwargs["username"] = f"{self.creds['domain']}\\{kwargs['username']}"
+                kwargs["username"] = f"{self.creds['domain']}{kwargs['username']}"
             if self.options.get("kerberos"):
                 kwargs["auth_protocol"] = "kerberos"
             if self.options.get("encrypt", False):
                 kwargs["require_encryption"] = True
-            smbclient.register_session(self.host, **kwargs)
-            _SESSIONS.add(key)
+            try:
+                smbclient.register_session(self.host, **kwargs)
+            finally:
+                _SESSIONS.add(key)
+
+    async def _writer(self, path: str, chunks: AsyncIterator[bytes], size: int | None) -> None:
+        def _open():
+            self._ensure_session()
+            return smbclient.open_file(self._path(path), mode="wb",
+                                       buffering=0, share_access="rwd")   # rwd: не блокировать rename
+        f = await asyncio.to_thread(_open)
+        try:
+            async for c in chunks:
+                await asyncio.to_thread(f.write, c)
+            await asyncio.to_thread(f.flush)                               # явный сброс на шару
+        finally:
+            await asyncio.to_thread(f.close)
+
+    async def _publish(self, tmp: str, final: str, overwrite: bool) -> None:
+        def _do():
+            src, dst = self._path(tmp), self._path(final)
+            if smbclient.path.exists(dst):
+                if not overwrite:
+                    raise StorageError(f"цель существует: {final}")
+                smbclient.remove(dst)
+            if not smbclient.path.exists(src):
+                # stale-сессия: перерегистрируем и пробуем ещё раз
+                self._ensure_session(force=True)
+                if not smbclient.path.exists(src):
+                    raise StorageError(
+                        f"временный объект не найден на шаре: {src} "
+                        f"(запись не завершена или сессия/кодировка UNC)")
+            try:
+                smbclient.rename(src, dst)
+            except OSError:
+                # fallback: copy+remove (rename капризен к кириллице/пробелам в smbclient)
+                with smbclient.open_file(src, mode="rb", buffering=0, share_access="r") as r, \
+                        smbclient.open_file(dst, mode="wb", buffering=0, share_access="w") as w:
+                    while data := r.read(self.chunk):
+                        w.write(data)
+                smbclient.remove(src)
+        await asyncio.to_thread(_do)
 
     def _path(self, path: str) -> str:
         rel = "/".join(p for p in (self.prefix, path.strip("/")) if p)
@@ -132,27 +172,6 @@ class SmbBackend(Backend):
         finally:
             await asyncio.to_thread(f.close)
 
-    async def _writer(self, path: str, chunks: AsyncIterator[bytes], size: int | None) -> None:
-        def _open():
-            self._ensure_session()
-            return smbclient.open_file(self._path(path), mode="wb", buffering=0, share_access="w")
-        f = await asyncio.to_thread(_open)
-        try:
-            async for c in chunks:
-                await asyncio.to_thread(f.write, c)
-        finally:
-            await asyncio.to_thread(f.close)
-
-    async def _publish(self, tmp: str, final: str, overwrite: bool) -> None:
-        def _do():
-            self._ensure_session()
-            src, dst = self._path(tmp), self._path(final)
-            if smbclient.path.exists(dst):
-                if not overwrite:
-                    raise StorageError(f"цель существует: {final}")
-                smbclient.remove(dst)
-            smbclient.rename(src, dst)
-        await asyncio.to_thread(_do)
 
     async def delete(self, path: str) -> None:
         def _do():

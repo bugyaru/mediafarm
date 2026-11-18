@@ -1,42 +1,63 @@
-{% extends "base.html" %}{% block content %}
-<h1>Папки наблюдения</h1>
-<table><thead><tr><th>Имя</th><th>Путь</th><th>Парсер</th><th>Последний скан</th><th>Вкл</th><th></th></tr></thead><tbody>
-{% for f in folders %}
-<tr><td>{{ f.name }}</td><td><code>{{ f.path }}</code></td><td>{{ f.parser_id or '—' }}</td>
-    <td>{{ f.last_scan_at or '—' }}</td><td>{{ 'да' if f.enabled else 'нет' }}</td>
-    <td class="row">
-        <button hx-post="/folders/{{ f.id }}/scan" hx-swap="none">Скан</button>
-        <button hx-post="/folders/{{ f.id }}/toggle" hx-swap="none">Вкл/выкл</button>
-        <button hx-get="/folders/{{ f.id }}/dry-run" hx-target="#dry-{{ f.id }}">Dry-run</button>
-        <form hx-post="/folders/{{ f.id }}/delete" hx-swap="none" onsubmit="return confirm('Удалить папку наблюдения?');">
-            <button class="danger">Удалить</button>
-        </form>
-    </td>></tr>
-<tr><td colspan="6" id="dry-{{ f.id }}"></td></tr>
-{% endfor %}</tbody></table>
-<div class="card"><h3>Добавить папку</h3>
+{% extends "base.html" %}{% block title %}Папки наблюдения · MediaFarm{% endblock %}
+{% block content %}
+{% set smap = {} %}{% for s in storages %}{% set _ = smap.update({(s.id|string): s.name}) %}{% endfor %}
+{% set pmap = {} %}{% for p in presets %}{% set _ = pmap.update({(p.id|string): p.name}) %}{% endfor %}
+<div class="mf-pagehead">
+    <div><h1>Папки наблюдения</h1><p class="mf-sub">Watcher сканирует хранилища, ждёт стабилизации файлов и ставит задачи по пресетам. Dry-run показывает, что будет захвачено, без постановки задач.</p></div>
+</div>
+
+<div class="mf-table-wrap mf-enhance" id="folders-wrap">
+    <table class="mf-table">
+        <thead><tr><th>Имя</th><th>Хранилище</th><th>Путь</th><th>Парсер → Пресет</th><th>Статус</th><th class="mf-act">Действия</th></tr></thead>
+        <tbody>
+        {% for f in folders %}
+        <tr class="{{ 'mf-warnrow' if f.last_error else '' }}">
+            <td><b>{{ f.name }}</b><div class="mf-small mf-dim">poll {{ f.poll_interval_s }}s · stable {{ f.stability_s }}s{% if f.recursive %} · рекурсивно{% endif %}</div></td>
+            <td><span class="mf-chip">{{ smap.get(f.storage_id|string, '—') }}</span></td>
+            <td><code>{{ f.path or '/' }}</code><div class="mf-small mf-dim">{{ f.include|join(', ') }}{% if f.exclude %} · кроме {{ f.exclude|join(', ') }}{% endif %}</div></td>
+            <td class="mf-small">{{ f.parser_id or '—' }} → {{ pmap.get(f.preset_id|string, '—') if f.preset_id else '—' }}</td>
+            <td>
+                <span class="mf-st {{ 's-online' if f.enabled else 's-cancelled' }}">{{ 'вкл' if f.enabled else 'выкл' }}</span>
+                <div class="mf-small mf-dim">скан: <span data-ts="{{ f.last_scan_at.isoformat() if f.last_scan_at else '' }}">—</span></div>
+                {% if f.last_error %}<div class="mf-small mf-bad">{{ f.last_error.get('message','ошибка')|truncate(60) }}</div>{% endif %}
+            </td>
+            <td class="mf-act">
+                <button class="mf-btn mf-btn-sm" hx-get="/folders/{{ f.id }}/dry-run" hx-target="#dry-{{ f.id }}" hx-swap="innerHTML">Dry-run</button>
+                <form hx-post="/folders/{{ f.id }}/scan" hx-swap="none"><button class="mf-btn mf-btn-sm mf-btn-ok">Скан</button></form>
+                <form hx-post="/folders/{{ f.id }}/toggle" hx-swap="none"><button class="mf-btn mf-btn-sm">{{ 'Выкл' if f.enabled else 'Вкл' }}</button></form>
+                {% if user.role == 'admin' %}
+                <form hx-post="/folders/{{ f.id }}/delete" hx-target="closest tr" hx-swap="outerHTML" hx-confirm="Удалить папку «{{ f.name }}»?"><button class="mf-btn mf-btn-sm mf-btn-danger">✕</button></form>
+                {% endif %}
+            </td>
+        </tr>
+        <tr class="mf-detail"><td colspan="6" id="dry-{{ f.id }}" class="mf-detail-cell"></td></tr>
+        {% else %}<tr><td colspan="6" class="mf-empty">Папок наблюдения нет — добавьте первую ниже.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Добавить папку наблюдения</h3>
     <form hx-post="/folders" hx-swap="none" class="grid">
-        <input name="name" placeholder="incoming" required>
-        <select name="storage_id">{% for s in storages %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
-        <input name="path" placeholder="incoming/">
-        <select name="preset_id">
-            <option value="">— без пресета (использовать job_template) —</option>
-            {% for p in presets %}
-            <option value="{{ p.id }}">{{ p.name }} v{{ p.version }}{% if p.description %} — {{ p.description }}{% endif %}</option>
-            {% endfor %}
-        </select>
-        <select name="parser_id"><option value="">без парсера</option>{% for p in parsers %}<option>{{ p }}</option>{% endfor %}</select>
-        <input name="include" value='["*.mxf","*.mp4","*.m3u8"]'>
-        <input name="exclude" value='["*.part"]'>
-        <input name="stability_s" type="number" value="60">
-        <input name="poll_interval_s" type="number" value="30">
-        <input name="ready_marker" placeholder="{name}.done (опц.)">
-        <textarea name="parser_opts" placeholder='{"item_xpath":".//Clip"}'>{}</textarea>
-        <textarea name="job_template" placeholder='{"preset_name":"proxy_1080p_nvenc","priority":100}'>{}</textarea>
-        <select name="archive_mode"><option>none</option><option>mark</option><option>move</option></select>
-        <input name="archive_path" placeholder="archive/">
-        <label><input type="checkbox" name="recursive" checked> рекурсивно</label>
-        <label><input type="checkbox" name="enabled" checked> включена</label>
-        <button>Добавить</button>
-    </form></div>
+        <label>Имя<input name="name" placeholder="in_movies" required></label>
+        <label>Хранилище<select name="storage_id" required>{% for s in storages %}<option value="{{ s.id }}">{{ s.name }} ({{ s.kind }})</option>{% endfor %}</select></label>
+        <label>Путь<input name="path" placeholder="incoming/movies"></label>
+        <label>Пресет<select name="preset_id"><option value="">— без пресета —</option>{% for p in presets %}<option value="{{ p.id }}">{{ p.name }} v{{ p.version }}</option>{% endfor %}</select></label>
+        <label>Парсер<select name="parser_id"><option value="">— без парсера —</option>{% for p in parsers %}<option>{{ p }}</option>{% endfor %}</select></label>
+        <label>Ready marker<input name="ready_marker" placeholder=".ready (опц.)"></label>
+        <label>Poll, с<input name="poll_interval_s" type="number" value="30" min="5"></label>
+        <label>Stability, с<input name="stability_s" type="number" value="60" min="0"></label>
+        <label>Include (JSON)<textarea name="include" rows="2">["*"]</textarea></label>
+        <label>Exclude (JSON)<textarea name="exclude" rows="2">[]</textarea></label>
+        <label>Parser opts (JSON)<textarea name="parser_opts" rows="2">{}</textarea></label>
+        <label>Job template (JSON)<textarea name="job_template" rows="2">{}</textarea></label>
+        <label>Concurrency key<input name="concurrency_key" placeholder="опц."></label>
+        <label>Max concurrency<input name="max_concurrency" type="number" value="0" min="0"></label>
+        <label>Архивация<select name="archive_mode"><option>none</option><option>mark</option><option>move</option></select></label>
+        <label>Archive path<input name="archive_path" placeholder="опц."></label>
+        <label class="mf-check"><input type="checkbox" name="recursive" checked> рекурсивно</label>
+        <label class="mf-check"><input type="checkbox" name="enabled" checked> включена</label>
+        <div class="mf-submit"><button class="mf-btn mf-btn-primary">Добавить папку</button></div>
+    </form>
+</div>
 {% endblock %}

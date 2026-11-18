@@ -1,22 +1,38 @@
-{% extends "base.html" %}{% block content %}
-<h1>Воркеры</h1>
-<div hx-get="/workers" hx-trigger="every 10s" hx-select="table" hx-target="table" hx-swap="outerHTML">
-    <table><thead><tr><th>ID</th><th>Тип</th><th>Состояние</th><th>CPU</th><th>GPU</th>
-        <th>Модель</th><th>NVENC</th><th>Heartbeat</th><th></th></tr></thead><tbody>
-    {% for w in workers %}
-    <tr><td>{{ w.id }}</td><td>{{ w.kind }}</td><td class="st-{{ w.state }}">{{ w.state }}</td>
-        <td>{{ w.cpu_used }}/{{ w.cpu_slots }}</td><td>{{ w.gpu_used }}/{{ w.gpu_slots }}</td>
-        <td>{{ w.labels.get('gpu_model','—') }}</td><td>{{ w.labels.get('nvenc','—') }}</td>
-        <td>{{ w.heartbeat_at }}</td>
-        <td class="row">
-            <button hx-post="/workers/{{ w.id }}/drain" hx-swap="none">Drain</button>
-            <form hx-post="/workers/{{ w.id }}/delete"
-                  hx-target="closest tr"
-                  hx-swap="outerHTML"
-                  onsubmit="return confirm('Удалить воркер из реестра? Это не остановит процесс на сервере, только удалит запись из UI.');">
-                <button class="danger" type="submit">Удалить</button>
-            </form>
-        </td></tr>
-    {% else %}<tr><td colspan="9">воркеров нет</td></tr>{% endfor %}
-    </tbody></table></div>
+{% extends "base.html" %}{% block title %}Воркеры · MediaFarm{% endblock %}
+{% block content %}
+<div class="mf-pagehead">
+    <div><h1>Воркеры</h1><p class="mf-sub">Вычислительные узлы фермы: CPU/GPU-слоты, heartbeat, drain. Красный heartbeat — узел не отвечает более 90 секунд.</p></div>
+    <div class="mf-chips">
+        <span class="mf-chip"><span class="mf-led ok"></span>online <b>{{ workers|selectattr('state','equalto','online')|list|length }}</b></span>
+        <span class="mf-chip"><span class="mf-led warn"></span>draining <b>{{ workers|selectattr('state','equalto','draining')|list|length }}</b></span>
+        <span class="mf-chip"><span class="mf-led err"></span>offline <b>{{ workers|selectattr('state','equalto','offline')|list|length }}</b></span>
+    </div>
+</div>
+<div class="mf-table-wrap mf-enhance" id="workers-wrap">
+    <table class="mf-table" style="min-width:1080px">
+        <thead><tr><th>ID</th><th>Тип</th><th>Состояние</th><th>CPU</th><th>GPU</th><th>Модель</th><th>NVENC</th><th>Heartbeat</th><th class="mf-act">Действия</th></tr></thead>
+        <tbody>
+        {% for w in workers %}
+        <tr class="{{ 'mf-err' if w.state == 'offline' else ('mf-warnrow' if w.state == 'draining' else '') }}">
+            <td><b class="mf-mono">{{ w.id }}</b><div class="mf-small mf-dim">v{{ w.version }}{% if w.host %} · {{ w.host }}{% endif %}</div></td>
+            <td><span class="mf-kind k-probe">{{ w.kind }}</span></td>
+            <td><span class="mf-st s-{{ w.state }}">{{ w.state }}</span></td>
+            <td><span class="mf-slots">{% for i in range([w.cpu_slots, 12]|min) %}<i class="mf-slot {{ 'on' if i < w.cpu_used else '' }}"></i>{% endfor %}</span><span class="mf-num">{{ w.cpu_used }}/{{ w.cpu_slots }}</span></td>
+            <td><span class="mf-slots">{% for i in range([w.gpu_slots, 8]|min) %}<i class="mf-slot gpu {{ 'on' if i < w.gpu_used else '' }}"></i>{% endfor %}</span><span class="mf-num">{{ w.gpu_used }}/{{ w.gpu_slots }}</span></td>
+            <td class="mf-small">{{ w.capabilities.get('gpu_model') or w.capabilities.get('model') or w.labels.get('gpu_model') or '—' }}</td>
+            <td>{% set nv = w.capabilities.get('nvenc', w.labels.get('nvenc')) %}<span class="mf-st {{ 's-online' if nv else 's-cancelled' }}">{{ 'да' if nv else 'нет' }}</span></td>
+            <td class="mf-small"><span class="mf-led" data-led></span> <span data-ts="{{ w.heartbeat_at.isoformat() }}" data-stale data-led></span></td>
+            <td class="mf-act">
+                {% if w.state == 'online' %}
+                <form hx-post="/workers/{{ w.id }}/drain" hx-swap="none"><button class="mf-btn mf-btn-sm">Drain</button></form>
+                {% endif %}
+                {% if user.role == 'admin' %}
+                <form hx-post="/workers/{{ w.id }}/delete" hx-target="closest tr" hx-swap="outerHTML" hx-confirm="Удалить воркер «{{ w.id }}» из реестра?"><button class="mf-btn mf-btn-sm mf-btn-danger">✕</button></form>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}<tr><td colspan="9" class="mf-empty">Воркеры не зарегистрированы — запустите worker-сервис.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}

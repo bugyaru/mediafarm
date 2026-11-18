@@ -1,25 +1,124 @@
-{% extends "base.html" %}{% block content %}
-<h1>Задача {{ job.id }}</h1>
-<div class="card">
-    <p><b>{{ job.state }}</b> · {{ job.kind }} · попытки {{ job.attempts }}/{{ job.max_attempts }}
-        · воркер {{ job.worker_id or '—' }}</p>
-    <progress max="100" value="{{ job.progress.get('pct') or 0 }}"></progress>
-    {{ job.progress }}
-    <div class="row">
-        <form hx-post="/jobs/{{ job.id }}/cancel" hx-swap="none"><button>Отменить</button></form>
-        <form hx-post="/jobs/{{ job.id }}/retry" hx-swap="none"><button>Перезапустить</button></form>
+{% extends "base.html" %}{% block title %}Задача {{ job.id|string|truncate(8, True, '') }} · MediaFarm{% endblock %}
+{% block content %}
+<div class="mf-pagehead">
+    <div>
+        <h1>Задача <span class="mf-mono">{{ job.id }}</span></h1>
+        <p class="mf-sub">
+            <span class="mf-st s-{{ job.state }}">{{ job.state }}</span>
+            &nbsp;<span class="mf-kind k-{{ job.kind }}">{{ job.kind }}</span>
+            &nbsp;<span class="mf-kind {{ 'mf-gpu' if job.requires_gpu else 'mf-cpu' }}">{{ 'GPU' if job.requires_gpu else 'CPU' }}</span>
+            {% if job.cancel_requested %}&nbsp;<span class="mf-st s-cancelled">отмена запрошена</span>{% endif %}
+        </p>
     </div>
-    {% if job.error %}<pre class="err">{{ job.error | tojson(indent=2) }}</pre>{% endif %}
+    <div class="mf-row">
+        {% if job.state in ('queued','running','retry_scheduled') %}
+        <form hx-post="/jobs/{{ job.id }}/cancel" hx-swap="none"><button class="mf-btn mf-btn-danger">Отменить</button></form>
+        {% endif %}
+        {% if job.state in ('failed','cancelled') %}
+        <form hx-post="/jobs/{{ job.id }}/retry" hx-swap="none"><button class="mf-btn mf-btn-ok">Перезапустить</button></form>
+        {% endif %}
+        <a class="mf-btn mf-btn-ghost" href="/jobs">← к очереди</a>
+    </div>
 </div>
-<h2>Шаги</h2>
-<table><thead><tr><th>#</th><th>Шаг</th><th>Engine</th><th>Состояние</th><th>Метрики</th></tr></thead><tbody>
-{% for s in steps %}<tr><td>{{ s.idx }}</td><td>{{ s.name }}</td><td>{{ s.engine or '' }}</td>
-    <td class="st-{{ s.state }}">{{ s.state }}</td><td><code>{{ s.metrics | tojson }}</code></td></tr>{% endfor %}
-</tbody></table>
+
+<div class="card">
+    <h3>Паспорт задачи</h3>
+    <div class="mf-metas">
+        <span class="mf-meta">приоритет: <b>{{ job.priority }}</b></span>
+        <span class="mf-meta">попытки: <b>{{ job.attempts }}/{{ job.max_attempts }}</b></span>
+        <span class="mf-meta">воркер: <b>{{ job.worker_id or '—' }}</b></span>
+        <span class="mf-meta">создал: <b>{{ job.created_by or '—' }}</b></span>
+        <span class="mf-meta">создана: <b>{{ job.created_at.strftime('%d.%m.%Y %H:%M:%S') }}</b></span>
+        {% if job.started_at %}<span class="mf-meta">старт: <b>{{ job.started_at.strftime('%H:%M:%S') }}</b></span>{% endif %}
+        {% if job.finished_at %}<span class="mf-meta">финиш: <b>{{ job.finished_at.strftime('%H:%M:%S') }}</b></span>{% endif %}
+        {% if job.preset_version %}<span class="mf-meta">пресет v<b>{{ job.preset_version }}</b></span>{% endif %}
+        {% if job.concurrency_key %}<span class="mf-meta">ключ: <b>{{ job.concurrency_key }}</b></span>{% endif %}
+        {% if asset %}<span class="mf-meta">ассет: <a href="/assets?q={{ asset.uri|urlencode }}"><b>{{ asset.uri|truncate(48) }}</b></a></span>{% endif %}
+    </div>
+    <div style="margin-top:12px">
+        <span class="mf-prog"><progress max="100" value="{{ job.progress.get('pct') or 0 }}"></progress>
+        <span class="pct">{{ '%.1f'|format(job.progress.get('pct') or 0) }}%</span></span>
+        <span class="mf-muted mf-small">шаг: {{ job.progress.get('step','—') }}{% if job.progress.get('speed') %} · {{ job.progress.get('speed') }}{% endif %}</span>
+    </div>
+    {% if job.error %}
+    <pre class="mf-errtext">{{ job.error.get('class','error') }}: {{ job.error.get('message','') }}{% if job.error.get('detail') %}
+{{ job.error.get('detail') }}{% endif %}</pre>
+    {% endif %}
+</div>
+
+<h2>Шаги конвейера</h2>
+<div class="card">
+    {% if steps %}
+    <ol class="mf-steps">
+        {% for s in steps %}
+        <li class="mf-step s-{{ s.state }}">
+            <span class="dot"></span>
+            <div class="hd">
+                <span class="nm">{{ s.idx }}. {{ s.name }}</span>
+                <span class="mf-st s-{{ s.state }}">{{ s.state }}</span>
+                {% if s.engine %}<span class="mf-kind k-probe">{{ s.engine }}</span>{% endif %}
+                <span class="tm">
+                {% if s.started_at %}{{ s.started_at.strftime('%H:%M:%S') }}{% endif %}
+                {% if s.finished_at %} → {{ s.finished_at.strftime('%H:%M:%S') }}{% endif %}
+            </span>
+            </div>
+            {% if s.metrics %}
+            <div class="mf-metas">{% for k, v in s.metrics.items() %}{% if loop.index <= 6 %}<span class="mf-meta">{{ k }}: <b>{{ v }}</b></span>{% endif %}{% endfor %}</div>
+            {% endif %}
+            {% if s.cmdline %}<pre class="cmd" data-copy="{{ s.cmdline }}" title="Клик — скопировать">{{ s.cmdline }}</pre>{% endif %}
+            {% if s.error %}<pre class="mf-errtext">{{ s.error.get('class','error') }}: {{ s.error.get('message','') }}</pre>{% endif %}
+            {% if s.log_uri %}<div class="mf-small mf-muted">лог: <code data-copy="{{ s.log_uri }}">{{ s.log_uri }}</code></div>{% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+    {% else %}<div class="mf-empty">Шаги ещё не созданы.</div>{% endif %}
+</div>
+
 <h2>Артефакты</h2>
-<ul>{% for a in artifacts %}<li>[{{ a.role }}] <code>{{ a.uri }}</code> ({{ a.size }} байт)</li>
-    {% else %}<li>нет</li>{% endfor %}</ul>
-<h2>События</h2>
-<table><tbody>{% for e in events %}<tr><td>{{ e.ts }}</td><td>{{ e.level }}</td>
-    <td>{{ e.type }}</td><td>{{ e.message }}</td></tr>{% endfor %}</tbody></table>
+<div class="mf-table-wrap">
+    <table class="mf-table">
+        <thead><tr><th>URI</th><th>Роль</th><th>Размер</th><th>Checksum</th><th>Создан</th></tr></thead>
+        <tbody>
+        {% for a in artifacts %}
+        <tr>
+            <td><code data-copy="{{ a.uri }}">{{ a.uri }}</code></td>
+            <td><span class="mf-kind k-file">{{ a.role }}</span></td>
+            <td class="mf-num" data-bytes="{{ a.size or '' }}"></td>
+            <td class="mf-mono mf-small mf-muted">{{ a.checksum or '—' }}</td>
+            <td class="mf-small" data-ts="{{ a.created_at.isoformat() }}"></td>
+        </tr>
+        {% else %}<tr><td colspan="5" class="mf-empty">Артефактов пока нет.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<h2>Журнал событий</h2>
+<div class="mf-log">
+    {% for e in events %}
+    <div class="mf-log-row">
+        <span class="ts">{{ e.ts.strftime('%H:%M:%S') }}</span>
+        <span class="lv lv-{{ e.level }}">{{ e.level }}</span>
+        <span class="tp">{{ e.type }}</span>
+        <span class="ms">{{ e.message or '' }}{% if e.data %} <span class="dt">{{ e.data|tojson }}</span>{% endif %}</span>
+    </div>
+    {% else %}<div class="mf-empty">Событий нет.</div>{% endfor %}
+</div>
+
+<section id="job-drawer" class="mf-drawer-only">
+    <div class="mf-metas" style="margin-bottom:14px">
+        <span class="mf-st s-{{ job.state }}">{{ job.state }}</span>
+        <span class="mf-kind k-{{ job.kind }}">{{ job.kind }}</span>
+        <span class="mf-kind {{ 'mf-gpu' if job.requires_gpu else 'mf-cpu' }}">{{ 'GPU' if job.requires_gpu else 'CPU' }}</span>
+    </div>
+    <div class="mf-metas">
+        <span class="mf-meta">прогресс: <b>{{ '%.1f'|format(job.progress.get('pct') or 0) }}%</b></span>
+        <span class="mf-meta">шаг: <b>{{ job.progress.get('step','—') }}</b></span>
+        <span class="mf-meta">попытки: <b>{{ job.attempts }}/{{ job.max_attempts }}</b></span>
+        <span class="mf-meta">воркер: <b>{{ job.worker_id or '—' }}</b></span>
+        <span class="mf-meta">приоритет: <b>{{ job.priority }}</b></span>
+        <span class="mf-meta">создана: <b>{{ job.created_at.strftime('%d.%m %H:%M:%S') }}</b></span>
+    </div>
+    {% if job.error %}<pre class="mf-errtext">{{ job.error.get('class','error') }}: {{ job.error.get('message','') }}</pre>{% endif %}
+    <div style="margin-top:16px"><a class="mf-btn mf-btn-primary" href="/jobs/{{ job.id }}">Открыть полностью ↗</a></div>
+</section>
 {% endblock %}

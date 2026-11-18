@@ -9,8 +9,8 @@ x-env: &env
   MF_UI_BOOTSTRAP_PASSWORD: ${MF_UI_BOOTSTRAP_PASSWORD:-admin-password-123}
   MF_UI_INTERNAL_TOKEN: ${MF_UI_INTERNAL_TOKEN:-internal-dev-token}
   MF_UI_BASE_URL: http://localhost:8080
-  MF_SECRET_IN_SMB_USERNAME: ${SMB_USER:-}
-  MF_SECRET_IN_SMB_PASSWORD: ${SMB_PASSWORD:-}
+  MF_SECRET_IN_SMB_USERNAME: ${SMB_USER:-bkntr@mgusit.lan}
+  MF_SECRET_IN_SMB_PASSWORD: ${SMB_PASSWORD:-1520Gub@55}
   MF_SECRET_OUT_S3_ACCESS_KEY: ${S3_ACCESS_KEY:-mfadmin}
   MF_SECRET_OUT_S3_SECRET_KEY: ${S3_SECRET_KEY:-mfadmin123}
 
@@ -37,6 +37,10 @@ services:
     environment: *env
     depends_on: {postgres: {condition: service_healthy}}
     restart: "no"
+  adminer:
+    image: adminer:latest
+    ports: ["8081:8080"]
+    depends_on: {postgres: {condition: service_healthy}}
 
   ui:
     image: mediafarm/ui:dev

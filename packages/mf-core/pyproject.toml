@@ -21,6 +21,7 @@ dependencies = [
     "nvidia-ml-py>=12.555",
     "watchdog>=4.0",
     "defusedxml>=0.7",
+    "libnfs>=1.0.0",
     "asgi-lifespan>=2.1"
 ]
 

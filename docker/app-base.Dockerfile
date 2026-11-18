@@ -8,12 +8,16 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY packages ./packages
 COPY services ./services
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential libnfs-dev \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN uv sync --frozen --package mf-${SERVICE} --no-dev
 
 FROM ${PYTHON_IMAGE}
 ARG SERVICE=ui
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      tini ca-certificates libpq5 curl \
+      tini ca-certificates libnfs13 libpq5 curl \
  && rm -rf /var/lib/apt/lists/* \
  && useradd -u 10001 -m -d /app app
 COPY --from=builder /app/.venv /app/.venv

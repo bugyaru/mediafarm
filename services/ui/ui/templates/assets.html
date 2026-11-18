@@ -1,18 +1,41 @@
-{% extends "base.html" %}{% block content %}
-<h1>Ассеты</h1>
-<form method="get" class="row">
-    <input name="q" value="{{ q }}" placeholder="поиск по URI">
-    <select name="state" onchange="this.form.submit()"><option value="">все</option>
-        {% for s in ['new','planned','processing','done','failed','broken','skipped'] %}
-        <option {% if state==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
-    <button>Найти</button>
-</form>
-<table><thead><tr><th>URI</th><th>Тип</th><th>Размер</th><th>Состояние</th><th>Задача</th></tr></thead><tbody>
-{% for a in assets %}<tr><td><code>{{ a.uri|truncate(80) }}</code></td><td>{{ a.kind }}</td>
-    <td>{{ a.size }}</td><td class="st-{{ a.state }}">{{ a.state }}</td>
-    <td><form hx-post="/jobs" hx-swap="none" class="row">
-        <input type="hidden" name="asset_id" value="{{ a.id }}">
-        <select name="preset_name">{% for p in presets %}<option>{{ p.name }}</option>{% endfor %}</select>
-        <button>Конвертировать</button></form></td></tr>{% endfor %}
-</tbody></table>
+{% extends "base.html" %}{% block title %}Ассеты · MediaFarm{% endblock %}
+{% block content %}
+<div class="mf-pagehead">
+    <div><h1>Ассеты</h1><p class="mf-sub">Реестр обнаруженных медиа-источников. Из любого ассета можно поставить задачу транскодирования.</p></div>
+    <form method="get" class="mf-row">
+        <select name="state" onchange="this.form.submit()" aria-label="Состояние">
+            <option value="">все состояния</option>
+            {% for s in ['new','planned','processing','done','failed','broken','skipped'] %}
+            <option value="{{ s }}" {% if state==s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        <input type="search" name="q" value="{{ q }}" placeholder="поиск по URI…">
+        <button class="mf-btn">Найти</button>
+    </form>
+</div>
+<div class="mf-table-wrap mf-enhance" id="assets-wrap">
+    <table class="mf-table">
+        <thead><tr><th>URI</th><th>Тип</th><th>Размер</th><th>Состояние</th><th>Mtime</th><th>Обнаружен</th><th class="mf-act">В задачу</th></tr></thead>
+        <tbody>
+        {% for a in assets %}
+        <tr class="{{ 'mf-err' if a.state in ('failed','broken') else ('mf-ok' if a.state == 'done' else ('mf-run' if a.state == 'processing' else '')) }}">
+            <td><code data-copy="{{ a.uri }}">{{ a.uri|truncate(72) }}</code></td>
+            <td><span class="mf-kind k-{{ a.kind }}">{{ a.kind }}</span></td>
+            <td class="mf-num" data-bytes="{{ a.size or '' }}"></td>
+            <td><span class="mf-st s-{{ a.state }}">{{ a.state }}</span></td>
+            <td class="mf-small" {% if a.mtime %}data-ts="{{ a.mtime.isoformat() }}"{% endif %}>—</td>
+            <td class="mf-small" data-ts="{{ a.discovered_at.isoformat() }}"></td>
+            <td class="mf-act">
+                <form hx-post="/jobs" hx-swap="none" class="mf-row" style="gap:6px">
+                    <input type="hidden" name="asset_id" value="{{ a.id }}">
+                    <input type="hidden" name="kind" value="transcode">
+                    <select name="preset_name" aria-label="Пресет">{% for p in presets %}<option>{{ p.name }}</option>{% endfor %}</select>
+                    <button class="mf-btn mf-btn-sm mf-btn-primary">→</button>
+                </form>
+            </td>
+        </tr>
+        {% else %}<tr><td colspan="7" class="mf-empty">Ассеты не найдены. Настройте папки наблюдения — источники появятся здесь.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}

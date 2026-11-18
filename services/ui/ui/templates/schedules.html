@@ -1,35 +1,51 @@
-{% extends "base.html" %}{% block content %}
-<h1>Расписания {% if not leader %}<small>(лидер на другой реплике)</small>{% endif %}</h1>
-<table>
-    <thead>
-    <tr><th>Имя</th><th>Cron</th><th>TZ</th><th>След.</th><th>Посл.</th><th>Вкл</th><th></th></tr>
-    </thead>
-    <tbody>
-    {% for s in schedules %}
-    <tr>
-        <td>{{ s.name }}</td>
-        <td><code>{{ s.cron }}</code></td>
-        <td>{{ s.timezone }}</td>
-        <td>{{ s.next_run_at or '—' }}</td>
-        <td>{{ s.last_run_at or '—' }}</td>
-        <td>{{ 'да' if s.enabled else 'нет' }}</td>
-        <td class="row">
-            <button hx-post="/schedules/{{ s.id }}/toggle" hx-swap="none">Вкл/выкл</button>
-            <form hx-post="/schedules/{{ s.id }}/delete" hx-swap="none" onsubmit="return confirm('Удалить расписание?');">
-                <button class="danger">Удалить</button>
-            </form>
-        </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-</table>
-<div class="card"><h3>Новое расписание</h3>
+{% extends "base.html" %}{% block title %}Расписания · MediaFarm{% endblock %}
+{% block content %}
+<div class="mf-pagehead">
+    <div><h1>Расписания</h1><p class="mf-sub">Cron-задачи фермы. Планировщик работает только на лидере кластера.</p></div>
+    <span class="mf-chip"><span class="mf-led {{ 'ok' if leader else 'warn pulse' }}"></span>планировщик: <b>{{ 'лидер' if leader else 'ожидание лидера' }}</b></span>
+</div>
+
+<div class="mf-table-wrap mf-enhance" id="schedules-wrap">
+    <table class="mf-table">
+        <thead><tr><th>Имя</th><th>Cron</th><th>TZ</th><th>Шаблон задачи</th><th>Вкл</th><th>Следующий запуск</th><th class="mf-act">Действия</th></tr></thead>
+        <tbody>
+        {% for s in schedules %}
+        <tr>
+            <td><b>{{ s.name }}</b><div class="mf-small mf-dim">misfire {{ s.misfire_grace_s }}s</div></td>
+            <td><code>{{ s.cron }}</code></td>
+            <td class="mf-small">{{ s.timezone }}</td>
+            <td class="mf-small">
+                <span class="mf-kind k-{{ s.job_template.get('kind','transcode') }}">{{ s.job_template.get('kind','transcode') }}</span>
+                {% if s.job_template.get('preset_name') %}<span class="mf-chip">{{ s.job_template.get('preset_name') }}</span>{% endif %}
+                {% if s.job_template.get('url') %}<div class="mf-dim mf-mono" style="font-size:.72rem">{{ s.job_template.get('url')|truncate(48) }}</div>{% endif %}
+            </td>
+            <td><span class="mf-st {{ 's-online' if s.enabled else 's-cancelled' }}">{{ 'да' if s.enabled else 'нет' }}</span></td>
+            <td class="mf-small">
+                {% if s.next_run_at %}<span data-ts="{{ s.next_run_at.isoformat() }}"></span><div class="mf-dim">{{ s.next_run_at.strftime('%d.%m %H:%M') }}</div>{% else %}—{% endif %}
+                {% if s.last_run_at %}<div class="mf-dim">посл: {{ s.last_run_at.strftime('%d.%m %H:%M') }}</div>{% endif %}
+            </td>
+            <td class="mf-act">
+                <form hx-post="/schedules/{{ s.id }}/toggle" hx-swap="none"><button class="mf-btn mf-btn-sm">{{ 'Выкл' if s.enabled else 'Вкл' }}</button></form>
+                {% if user.role == 'admin' %}
+                <form hx-post="/schedules/{{ s.id }}/delete" hx-target="closest tr" hx-swap="outerHTML" hx-confirm="Удалить расписание «{{ s.name }}»?"><button class="mf-btn mf-btn-sm mf-btn-danger">✕</button></form>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}<tr><td colspan="7" class="mf-empty">Расписаний нет — создайте первое ниже.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Новое расписание</h3>
     <form hx-post="/schedules" hx-swap="none" class="grid">
-        <input name="name" placeholder="nightly-capture" required>
-        <input name="cron" placeholder="*/15 * * * *" required>
-        <input name="timezone" value="UTC">
-        <textarea name="job_template" rows="8">{"kind":"capture","preset_name":"stream_capture","url":"https://…","params":{"max_duration_s":600}}</textarea>
-        <label><input type="checkbox" name="enabled" checked> включено</label>
-        <button>Сохранить</button>
-    </form></div>
+        <label>Имя<input name="name" placeholder="nightly_probe" required></label>
+        <label>Cron<input name="cron" placeholder="*/5 * * * *" required></label>
+        <label>Timezone<input name="timezone" value="UTC"></label>
+        <label>Misfire grace, с<input name="misfire_grace_s" type="number" value="300" min="0"></label>
+        <label class="mf-wide">Job template (JSON)<textarea name="job_template" rows="5">{"kind":"transcode","preset_name":"{{ presets[0].name if presets else '' }}","input_uri":""}</textarea></label>
+        <label class="mf-check"><input type="checkbox" name="enabled" checked> включено</label>
+        <div class="mf-submit"><button class="mf-btn mf-btn-primary">Сохранить расписание</button></div>
+    </form>
+</div>
 {% endblock %}

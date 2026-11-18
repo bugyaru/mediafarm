@@ -1,12 +1,13 @@
-<tr id="job-{{ job.id }}" {% if oob %}hx-swap-oob="outerHTML"{% endif %}>
-<td><a href="/jobs/{{ job.id }}">{{ job.id|string|truncate(8, True, '') }}</a></td>
-<td>{{ job.kind }}</td>
-<td class="st-{{ job.state }}">{{ job.state }}</td>
-<td>{{ job.progress.get('step','—') }}</td>
-<td><progress max="100" value="{{ job.progress.get('pct') or 0 }}"></progress>
-    {{ '%.1f'|format(job.progress.get('pct') or 0) }}%</td>
-<td>{{ job.progress.get('speed') or '' }}</td>
-<td>{{ job.attempts }}/{{ job.max_attempts }}</td>
-<td>{{ job.worker_id or '—' }}</td>
-<td>{% if job.requires_gpu %}GPU{% else %}CPU{% endif %}</td>
+<tr id="job-{{ job.id }}" data-id="{{ job.id }}" data-state="{{ job.state }}"
+    class="{{ 'mf-run' if job.state == 'running' else ('mf-err' if job.state == 'failed' else ('mf-ok' if job.state == 'succeeded' else ('mf-warnrow' if job.state in ('queued','retry_scheduled') else ''))) }}"
+    {% if oob %}hx-swap-oob="outerHTML"{% endif %}>
+    <td><button class="mf-link" data-drawer hx-get="/jobs/{{ job.id }}" hx-select="#job-drawer" hx-target="#mf-drawer-body" hx-swap="innerHTML">{{ job.id|string|truncate(8, True, '') }}</button><a class="mf-ext" href="/jobs/{{ job.id }}" title="Открыть страницу задачи">↗</a></td>
+    <td><span class="mf-kind k-{{ job.kind }}">{{ job.kind }}</span></td>
+    <td><span class="mf-st s-{{ job.state }}">{{ job.state }}</span></td>
+    <td class="mf-small">{{ job.progress.get('step','—') }}</td>
+    <td><span class="mf-prog"><progress max="100" value="{{ job.progress.get('pct') or 0 }}"></progress><span class="pct">{{ '%.1f'|format(job.progress.get('pct') or 0) }}%</span></span></td>
+    <td class="mf-num">{{ job.progress.get('speed') or '—' }}</td>
+    <td class="mf-num">{{ job.attempts }}/{{ job.max_attempts }}</td>
+    <td class="mf-mono mf-small">{{ job.worker_id or '—' }}</td>
+    <td><span class="mf-kind {{ 'mf-gpu' if job.requires_gpu else 'mf-cpu' }}">{{ 'GPU' if job.requires_gpu else 'CPU' }}</span></td>
 </tr>

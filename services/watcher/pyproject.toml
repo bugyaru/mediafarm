@@ -2,7 +2,9 @@
 name = "mf-watcher"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["mf-core"]
+dependencies = [
+    "mf-core",
+]
 
 [project.scripts]
 mf-watcher = "watcher.main:cli"

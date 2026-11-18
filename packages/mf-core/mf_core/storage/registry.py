@@ -10,16 +10,26 @@ from mf_core.errors import ConfigInvalidError
 from mf_core.models import Storage
 from mf_core.secrets import SecretResolver
 from mf_core.storage.base import Backend, StorageRow
-from mf_core.storage.ftp import FtpBackend
 from mf_core.storage.local import LocalBackend
-from mf_core.storage.s3 import S3Backend
 from mf_core.storage.smb import SmbBackend
+from mf_core.storage.s3 import S3Backend
+from mf_core.storage.ftp import FtpBackend
 
-BUILDERS = {
-    "local": LocalBackend, "nfs": LocalBackend,
-    "smb": SmbBackend, "s3": S3Backend, "ftp": FtpBackend,
+BUILDERS: dict[str, type] = {
+    "local": LocalBackend,
+    "smb": SmbBackend,
+    "s3": S3Backend,
+    "ftp": FtpBackend,
 }
 
+try:
+    from mf_core.storage import nfs as _nfs
+    if _nfs.NFS is not None:
+        BUILDERS["nfs"] = _nfs.NfsBackend
+    else:
+        BUILDERS["nfs"] = LocalBackend
+except ImportError:
+    BUILDERS["nfs"] = LocalBackend
 
 @dataclass(frozen=True, slots=True)
 class ParsedUri:

@@ -1,0 +1,40 @@
+{% set test = test if test is defined else none %}
+{% set status = 'ok' if test and test.get('ok') else ('err' if test else 'idle') %}
+<tr id="row-{{ s.id }}" class="st-row is-{{ status }}" data-status="{{ status }}"
+    data-name="{{ s.name|lower }}" data-kind="{{ s.kind }}" data-uri="{{ s.base_uri|lower }}">
+    <td class="st-c-name">
+        <span class="st-dot" aria-hidden="true"></span>
+        <span class="st-name">{{ s.name }}</span>
+        <span class="st-badge"{% if test and test.get('checked_at') %} title="Проверено: {{ test.get('checked_at') }}"{% endif %}>
+        {% if status == 'ok' %}OK{% set lat = test.get('latency_ms') %}{% if lat is not none %} · {{ '%.0f'|format(lat) }} ms{% endif %}
+        {% elif status == 'err' %}FAIL{% endif %}
+        </span>
+    </td>
+    <td><span class="st-kind st-kind-{{ s.kind }}">{{ s.kind }}</span></td>
+    <td class="st-c-uri"><code>{{ s.base_uri }}</code></td>
+    <td class="st-c-secret">{{ s.secret_ref or '—' }}</td>
+    <td class="st-c-ro">{{ 'да' if s.read_only else 'нет' }}</td>
+    <td class="st-c-actions">
+        <!-- Кнопка Вкл/Выкл -->
+        <form hx-post="/storages/{{ s.id }}/toggle" hx-swap="outerHTML" hx-target="closest tr" style="display:inline-block; margin-right: 4px;">
+            <button class="st-btn {{ 'st-btn-ok' if s.enabled else 'st-btn-ghost' }}" title="Включить/Выключить">
+                {{ 'Вкл' if s.enabled else 'Выкл' }}
+            </button>
+        </form>
+
+        <!-- Кнопка Изменить (открывает drawer) -->
+        <button class="st-btn st-btn-test" data-drawer hx-get="/storages/{{ s.id }}/edit" hx-target="#mf-drawer-body" hx-swap="innerHTML" title="Редактировать">✎</button>
+
+        <!-- Кнопка Проверить -->
+        <button class="st-btn st-btn-test" hx-post="/storages/{{ s.id }}/test" hx-target="#test-{{ s.id }}" hx-swap="innerHTML" title="Проверить соединение">
+            <span class="st-spin" aria-hidden="true"></span><span>Проверить</span>
+        </button>
+
+        <!-- Кнопка Удалить -->
+        <form class="st-del" hx-post="/storages/{{ s.id }}/delete" hx-swap="outerHTML" hx-target="closest tr" hx-confirm="Удалить хранилище «{{ s.name }}»?">
+            <button class="st-btn st-btn-danger" title="Удалить">✕</button>
+        </form>
+    </td>
+</tr>
+<!-- Строка для вывода результатов проверки (остаётся на месте при обновлении верхней строки) -->
+<tr class="st-detail"><td colspan="6" id="test-{{ s.id }}" class="st-detail-cell" aria-live="polite"></td></tr>

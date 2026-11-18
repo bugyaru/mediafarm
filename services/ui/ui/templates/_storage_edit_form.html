@@ -1,0 +1,48 @@
+<div class="mf-metas" style="margin-bottom: 16px;">
+    <span class="mf-meta">ID: <b>{{ storage.id }}</b></span>
+    <span class="mf-meta">Создано: <b>{{ storage.created_at.strftime('%d.%m.%Y %H:%M') }}</b></span>
+</div>
+
+<form hx-post="/storages/{{ storage.id }}/edit" hx-swap="none" class="st-grid" style="margin-top: 12px;">
+    <label>Имя хранилища
+        <input name="name" value="{{ storage.name }}" required maxlength="128">
+    </label>
+
+    <label>Тип (нельзя изменить после создания)
+        <input type="text" value="{{ storage.kind }}" disabled style="opacity: 0.6; cursor: not-allowed;">
+        <input type="hidden" name="kind" value="{{ storage.kind }}">
+    </label>
+
+    <label class="st-wide">Base URI
+        <input name="base_uri" value="{{ storage.base_uri }}" required placeholder="s3://bucket или smb://server/share">
+    </label>
+
+    <label>Mount path (опционально)
+        <input name="mount_path" value="{{ storage.mount_path or '' }}" placeholder="/mnt/share">
+    </label>
+
+    <label>Secret ref (опционально)
+        <input name="secret_ref" value="{{ storage.secret_ref or '' }}" placeholder="env:MY_SECRET">
+    </label>
+
+    <label class="st-wide">Options (JSON)
+        <textarea name="options" rows="5" spellcheck="false" placeholder='{"endpoint_url": "http://minio:9000"}'>{{ storage.options | tojson }}</textarea>
+        <span class="st-note">Используйте двойные кавычки для ключей и значений</span>
+    </label>
+
+    <div style="display: flex; gap: 16px; align-items: center; grid-column: 1 / -1; margin-top: 8px;">
+        <label class="st-check" style="margin: 0;">
+            <input type="checkbox" name="read_only" {% if storage.read_only %}checked{% endif %}>
+            Только чтение (read_only)
+        </label>
+        <label class="st-check" style="margin: 0;">
+            <input type="checkbox" name="enabled" {% if storage.enabled %}checked{% endif %}>
+            Активно (enabled)
+        </label>
+    </div>
+
+    <div class="st-submit" style="grid-column: 1 / -1; margin-top: 16px; display: flex; gap: 12px;">
+        <button type="submit" class="st-btn st-btn-primary">Сохранить изменения</button>
+        <button type="button" class="st-btn st-btn-ghost" data-drawer-close>Отмена</button>
+    </div>
+</form>

@@ -3,24 +3,55 @@
 <head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{% block title %}MediaFarm{% endblock %}</title>
-    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/app.css?v=3">
     <script src="/static/vendor/htmx.min.js" defer></script>
     <script src="/static/vendor/htmx-ws.js" defer></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
+    <script src="/static/mf.js?v=3" defer></script>
 </head>
 <body hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'>
+{% set p = request.url.path if request is defined else '' %}
 <nav>
-    <b>MediaFarm</b>
-    <a href="/">Дашборд</a><a href="/jobs">Задачи</a><a href="/assets">Ассеты</a>
-    <a href="/folders">Папки</a><a href="/storages">Хранилища</a>
-    <a href="/presets">Пресеты</a><a href="/schedules">Расписания</a><a href="/workers">Воркеры</a>
-    {% if user and user.role == 'admin' %}<a href="/users">Пользователи</a>{% endif %}
+    <span class="mf-brand"><span class="mf-led brand"></span><b>MediaFarm</b><small>ops console</small></span>
+    <span class="mf-navlinks">
+        <a href="/" class="{{ 'active' if p == '/' }}">Дашборд</a>
+        <a href="/jobs" class="{{ 'active' if p.startswith('/jobs') }}">Задачи</a>
+        <a href="/assets" class="{{ 'active' if p.startswith('/assets') }}">Ассеты</a>
+        <a href="/folders" class="{{ 'active' if p.startswith('/folders') }}">Папки</a>
+        <a href="/storages" class="{{ 'active' if p.startswith('/storages') }}">Хранилища</a>
+        <a href="/presets" class="{{ 'active' if p.startswith('/presets') }}">Пресеты</a>
+        <a href="/schedules" class="{{ 'active' if p.startswith('/schedules') }}">Расписания</a>
+        <a href="/workers" class="{{ 'active' if p.startswith('/workers') }}">Воркеры</a>
+        {% if user and user.role == 'admin' %}<a href="/users" class="{{ 'active' if p.startswith('/users') }}">Пользователи</a>{% endif %}
+    </span>
     <span class="spacer"></span>
-    {% if user %}<span>{{ user.username }} ({{ user.role }})</span>
-    <form method="post" action="/logout" class="inline"><button class="link">Выйти</button></form>{% endif %}
+    <span class="mf-topmeta">
+        <span class="mf-ws"><span id="mf-ws-led" class="mf-led"></span><span id="mf-ws-txt">WS —</span></span>
+        <span id="mf-clock" class="mf-clock"></span>
+        {% if user %}
+        <span class="mf-userchip"><span class="mf-led ok"></span>{{ user.username }} <em>({{ user.role }})</em></span>
+        <form method="post" action="/logout" class="inline"><button class="mf-btn mf-btn-sm mf-btn-ghost">Выйти</button></form>
+        {% else %}<a href="/login" class="mf-btn mf-btn-sm">Войти</a>{% endif %}
+    </span>
 </nav>
-{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
-{% if err %}<div class="flash err">{{ err }}</div>{% endif %}
-<main>{% block content %}{% endblock %}</main>
+<main>
+    {% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+    {% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+    {% block content %}{% endblock %}
+</main>
+<footer class="mf-foot">
+    <span>{{ app_name }} · пульт оператора медиафермы</span>
+    <span>HTMX + WebSockets · live-обновления</span>
+    <span class="mf-dim">«/» — фильтр · Esc — закрыть панель</span>
+</footer>
+
+<div id="mf-drawer" class="mf-drawer" aria-hidden="true">
+    <div class="mf-drawer-scrim" data-drawer-close></div>
+    <aside class="mf-drawer-panel" role="dialog" aria-modal="true" aria-label="Детали">
+        <header><b>Детали</b><button type="button" class="mf-btn mf-btn-sm mf-btn-ghost" data-drawer-close>✕</button></header>
+        <div id="mf-drawer-body" class="mf-drawer-body"></div>
+    </aside>
+</div>
+<div id="mf-toasts"></div>
 </body>
 </html>

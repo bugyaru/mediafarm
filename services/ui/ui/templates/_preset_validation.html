@@ -1,6 +1,15 @@
-<!-- _preset_validation.html -->
-<div class="flash {{ 'ok' if result.ok else 'err' }}">
-    {% if result.ok %}Пресет валиден · воркеров: {{ result.workers }} (GPU: {{ result.gpu_workers }})
-    <ul>{% for w in result.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
-    {% else %}{{ result.error }}{% endif %}
+{% set ok = result.get('ok') %}
+<div class="mf-result {{ 'ok' if ok else 'err' }}" style="margin:12px 0 0">
+    <div class="ico">{{ '✓' if ok else '✕' }}</div>
+    <div class="bd">
+        <div class="tt">{{ 'Спецификация валидна' if ok else 'Спецификация отклонена' }}</div>
+        {% if ok %}
+        <div class="mf-metas">
+            {% for k, v in result.items() %}{% if k != 'ok' and loop.index <= 7 %}{% if v is string or v is number %}<span class="mf-meta">{{ k }}: <b>{{ v }}</b></span>{% endif %}{% endif %}{% endfor %}
+        </div>
+        {% else %}
+        <pre class="mf-errtext">{{ result.get('error') or result.get('message') or result|tojson }}</pre>
+        <div class="mf-hint">→ transcode требует блок video; publish требует storage и path; id шагов уникальны</div>
+        {% endif %}
+    </div>
 </div>

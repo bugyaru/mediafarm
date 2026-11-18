@@ -1,32 +1,45 @@
-{% extends "base.html" %}{% block content %}
-<h1>Пресеты</h1>
-<form hx-post="/presets/seed" hx-swap="none"><button>Загрузить встроенные</button></form>
-<table>
-    <thead>
-    <tr><th>Имя</th><th>Версия</th><th>GPU</th><th>Шаги</th><th>Вкл</th><th></th></tr>
-    </thead>
-    <tbody>
-    {% for p in presets %}
-    <tr>
-        <td>{{ p.name }}</td>
-        <td>{{ p.version }}</td>
-        <td>{{ 'да' if p.spec.get('requires_gpu') else 'нет' }}</td>
-        <td>{{ p.spec.get('steps', []) | map(attribute='id') | join(', ') }}</td>
-        <td>{{ 'да' if p.enabled else 'нет' }}</td>
-        <td>
-            <form hx-post="/presets/{{ p.id }}/delete" hx-swap="none" onsubmit="return confirm('Удалить пресет?');">
-                <button class="danger">Удалить</button>
-            </form>
-        </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-</table>
-<div class="card"><h3>Новый пресет (JSON)</h3>
-    <textarea id="spec" name="spec" rows="18">{{ builtins and '' }}</textarea>
-    <div class="row">
-        <button hx-post="/presets/validate" hx-include="#spec" hx-target="#validation">Проверить</button>
-        <button hx-post="/presets" hx-include="#spec" hx-swap="none">Сохранить</button>
+{% extends "base.html" %}{% block title %}Пресеты · MediaFarm{% endblock %}
+{% block content %}
+<div class="mf-pagehead">
+    <div><h1>Пресеты</h1><p class="mf-sub">Спецификации конвейеров: шаги, кодеки, GPU-требования. Проверка валидирует spec без сохранения.</p></div>
+    <form hx-post="/presets/seed" hx-swap="none"><button class="mf-btn mf-btn-ok">Загрузить встроенные</button></form>
+</div>
+{% if builtins %}
+<div class="mf-chips" style="margin-bottom:16px">
+    <span class="mf-muted mf-small">встроенные:</span>
+    {% for b in builtins %}<span class="mf-chip">{{ b }}</span>{% endfor %}
+</div>
+{% endif %}
+
+<div class="mf-table-wrap mf-enhance" id="presets-wrap">
+    <table class="mf-table">
+        <thead><tr><th>Имя</th><th>Версия</th><th>GPU</th><th>Шаги</th><th>Вкл</th><th class="mf-act">Действия</th></tr></thead>
+        <tbody>
+        {% for p in presets %}
+        <tr>
+            <td><b>{{ p.name }}</b>{% if p.description %}<div class="mf-small mf-dim">{{ p.description|truncate(70) }}</div>{% endif %}</td>
+            <td class="mf-num">v{{ p.version }}</td>
+            <td><span class="mf-kind {{ 'mf-gpu' if p.spec.get('requires_gpu') else 'mf-cpu' }}">{{ 'GPU' if p.spec.get('requires_gpu') else 'CPU' }}</span></td>
+            <td class="mf-small">{% for s in p.spec.get('steps', []) %}<span class="mf-chip" style="margin:2px">{{ s.get('id','?') }}</span>{% endfor %}</td>
+            <td><span class="mf-st {{ 's-online' if p.enabled else 's-cancelled' }}">{{ 'да' if p.enabled else 'нет' }}</span></td>
+            <td class="mf-act">
+                {% if user.role == 'admin' %}
+                <form hx-post="/presets/{{ p.id }}/delete" hx-target="closest tr" hx-swap="outerHTML" hx-confirm="Удалить пресет «{{ p.name }}»?"><button class="mf-btn mf-btn-sm mf-btn-danger">✕</button></form>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}<tr><td colspan="6" class="mf-empty">Пресетов нет — загрузите встроенные или создайте свой.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Новый пресет (JSON spec)</h3>
+    <textarea id="spec" name="spec" rows="16" spellcheck="false" style="width:100%">{"name":"custom_1080p","version":1,"requires_gpu":false,"steps":[{"id":"probe","engine":"ffmpeg"},{"id":"transcode","engine":"ffmpeg","video":{"codec":"h264_nvenc","cpu_codec":"libx264","bitrate":"6M"},"audio":[{"codec":"aac","bitrate":"192k"}],"scale":{"width":1920,"height":1080,"mode":"fit"}}]}</textarea>
+    <div class="mf-note" style="margin:6px 0 12px">шаги: acquire · probe · transcode · thumbnail · verify · publish · notify · двойные кавычки обязательны</div>
+    <div class="mf-row">
+        <button class="mf-btn" hx-post="/presets/validate" hx-include="#spec" hx-target="#validation">Проверить</button>
+        <button class="mf-btn mf-btn-primary" hx-post="/presets" hx-include="#spec" hx-swap="none">Сохранить</button>
     </div>
     <div id="validation"></div>
 </div>

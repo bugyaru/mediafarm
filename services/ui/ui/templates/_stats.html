@@ -1,14 +1,39 @@
-<div id="stats" class="grid">
-    <div class="card"><h3>В очереди</h3><div class="big">{{ queued }}</div></div>
-    <div class="card"><h3>Выполняется</h3><div class="big">{{ running }}</div></div>
-    <div class="card"><h3>Ошибки</h3><div class="big err">{{ failed }}</div></div>
-    <div class="card"><h3>Ассеты</h3><div class="big">{{ assets }}</div></div>
-    <div class="card wide"><h3>Воркеры</h3>
-        <table><tbody>
-        {% for w in workers %}
-        <tr><td>{{ w.id }}</td><td>{{ w.kind }}</td><td class="st-{{ w.state }}">{{ w.state }}</td>
-            <td>CPU {{ w.cpu_used }}/{{ w.cpu_slots }}</td><td>GPU {{ w.gpu_used }}/{{ w.gpu_slots }}</td></tr>
-        {% else %}<tr><td>воркеров нет</td></tr>{% endfor %}
-        </tbody></table>
+<div id="mf-stats" hx-get="/partials/stats" hx-trigger="every 5s" hx-swap="outerHTML">
+    <div class="mf-tiles">
+        <div class="mf-tile t-queue"><div class="l">В очереди</div><div class="n">{{ queued }}</div><div class="d">ожидают слота</div></div>
+        <div class="mf-tile t-run"><div class="l">Выполняется</div><div class="n">{{ running }}</div><div class="d">активные задачи</div></div>
+        <div class="mf-tile t-fail"><div class="l">Ошибки</div><div class="n">{{ failed }}</div><div class="d">требуют внимания</div></div>
+        <div class="mf-tile t-assets"><div class="l">Ассеты</div><div class="n">{{ assets }}</div><div class="d">в реестре</div></div>
+        <div class="mf-tile t-workers"><div class="l">Воркеры online</div><div class="n">{{ workers|selectattr('state','equalto','online')|list|length }}</div><div class="d">из {{ workers|length }} зарегистрированных</div></div>
     </div>
+    <div class="card">
+        <h3>Очередь по состояниям</h3>
+        {% set total = queue|sum(attribute='n') or 1 %}
+        <div class="mf-qbars">
+            {% for r in queue %}
+            <div class="mf-qbar q-{{ r.state }}">
+                <span class="mf-st s-{{ r.state }}">{{ r.state }}</span>
+                <span class="track"><span class="fill" style="width:{{ (100 * r.n / total)|round(1) }}%"></span></span>
+                <span class="n">{{ r.n }}</span>
+            </div>
+            {% else %}
+            <div class="mf-muted mf-small">Очередь пуста — ферма отдыхает.</div>
+            {% endfor %}
+        </div>
+    </div>
+    {% if workers %}
+    <div class="mf-workergrid">
+        {% for w in workers %}
+        <div class="mf-workercard">
+            <div class="id"><span class="mf-led {{ 'ok' if w.state == 'online' else ('warn' if w.state == 'draining' else 'err') }}"></span>{{ w.id }}</div>
+            <div class="meta">{{ w.kind }} · v{{ w.version }}{% if w.host %} · {{ w.host }}{% endif %}</div>
+            <div class="mf-small mf-muted">
+                CPU <span class="mf-slots">{% for i in range([w.cpu_slots, 12]|min) %}<i class="mf-slot {{ 'on' if i < w.cpu_used else '' }}"></i>{% endfor %}</span>{{ w.cpu_used }}/{{ w.cpu_slots }}
+                &nbsp; GPU <span class="mf-slots">{% for i in range([w.gpu_slots, 8]|min) %}<i class="mf-slot gpu {{ 'on' if i < w.gpu_used else '' }}"></i>{% endfor %}</span>{{ w.gpu_used }}/{{ w.gpu_slots }}
+            </div>
+            <div class="mf-small mf-dim">heartbeat: <span data-ts="{{ w.heartbeat_at.isoformat() }}" data-stale data-led></span></div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 </div>

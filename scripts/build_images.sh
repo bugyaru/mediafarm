@@ -37,19 +37,19 @@ done
 
 # --- Сборка Media Base (FFmpeg, FFmbc, CUDA) ---
 # Самые тяжелые образы. Сборка cuda под amd64 на ARM-машине может занять часы.
-build "${REGISTRY}/media-base:cpu-${TAG}" docker/media-base.Dockerfile --target cpu --build-arg INSTALL_FFMBC=1
-build "${REGISTRY}/media-base:cuda-${TAG}" docker/media-base.Dockerfile --target cuda --build-arg INSTALL_FFMBC=1
+#build "${REGISTRY}/media-base:cpu-${TAG}" docker/media-base.Dockerfile --target cpu --build-arg INSTALL_FFMBC=1
+#build "${REGISTRY}/media-base:cuda-${TAG}" docker/media-base.Dockerfile --target cuda --build-arg INSTALL_FFMBC=1
 
 # --- Сборка конечных сервисов ---
 build "${REGISTRY}/ui:${TAG}" docker/ui.Dockerfile --build-arg APP_BASE="${REGISTRY}/app-base:ui-${TAG}"
-build "${REGISTRY}/watcher:${TAG}" docker/watcher.Dockerfile --build-arg APP_BASE="${REGISTRY}/app-base:watcher-${TAG}"
-build "${REGISTRY}/worker:${TAG}-cpu" docker/worker.Dockerfile \
-  --build-arg APP_BASE="${REGISTRY}/app-base:worker-${TAG}" \
-  --build-arg MEDIA_BASE="${REGISTRY}/media-base:cpu-${TAG}"
-build "${REGISTRY}/worker:${TAG}-cuda" docker/worker.Dockerfile \
-  --build-arg APP_BASE="${REGISTRY}/app-base:worker-${TAG}" \
-  --build-arg MEDIA_BASE="${REGISTRY}/media-base:cuda-${TAG}"
-build "${REGISTRY}/migrations:${TAG}" docker/migrations.Dockerfile
+#build "${REGISTRY}/watcher:${TAG}" docker/watcher.Dockerfile --build-arg APP_BASE="${REGISTRY}/app-base:watcher-${TAG}"
+#build "${REGISTRY}/worker:${TAG}-cpu" docker/worker.Dockerfile \
+#  --build-arg APP_BASE="${REGISTRY}/app-base:worker-${TAG}" \
+#  --build-arg MEDIA_BASE="${REGISTRY}/media-base:cpu-${TAG}"
+#build "${REGISTRY}/worker:${TAG}-cuda" docker/worker.Dockerfile \
+#  --build-arg APP_BASE="${REGISTRY}/app-base:worker-${TAG}" \
+#  --build-arg MEDIA_BASE="${REGISTRY}/media-base:cuda-${TAG}"
+#build "${REGISTRY}/migrations:${TAG}" docker/migrations.Dockerfile
 
 # --- Push в Registry (опционально) ---
 if [ "$PUSH" = "1" ]; then

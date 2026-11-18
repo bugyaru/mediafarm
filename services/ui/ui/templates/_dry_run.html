@@ -1,0 +1,45 @@
+{% if result.get('error') %}
+<div class="mf-result err">
+    <div class="ico">✕</div>
+    <div class="bd">
+        <div class="tt">Dry-run не выполнен: {{ folder.name }}</div>
+        <pre class="mf-errtext">{{ result.get('error') }}</pre>
+        <div class="mf-hint">→ проверьте хранилище и путь папки на странице «Хранилища»</div>
+    </div>
+</div>
+{% else %}
+<div class="mf-result ok">
+    <div class="ico">✓</div>
+    <div class="bd">
+        <div class="tt">Dry-run: {{ folder.name }} — совпало {{ result.get('matched', 0) }} файл(ов){% if result.get('truncated') %} (показаны первые 20){% endif %}</div>
+        <div class="mf-metas">
+            <span class="mf-meta">источников: <b>{{ result.get('sources', [])|length }}</b></span>
+            <span class="mf-meta">ошибок парсера: <b>{{ result.get('errors', [])|length }}</b></span>
+            <span class="mf-meta">парсеры: <b>{{ result.get('parsers', [])|join(', ') or '—' }}</b></span>
+        </div>
+        {% if result.get('items') %}
+        <div class="mf-table-wrap" style="margin:10px 0 0">
+            <table>
+                <thead><tr><th>Путь</th><th>Размер</th><th>Fingerprint</th></tr></thead>
+                <tbody>
+                {% for it in result.get('items', []) %}
+                <tr><td><code>{{ it.path }}</code></td><td class="mf-num" data-bytes="{{ it.size or '' }}"></td><td class="mf-mono mf-small mf-muted">{{ it.fingerprint|truncate(16, True, '') }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% if result.get('sources') %}
+        <div class="mf-small" style="margin-top:10px">
+            {% for s in result.get('sources', []) %}
+            <div>→ <code>{{ s.uri|truncate(80) }}</code> <span class="mf-kind k-{{ s.kind }}">{{ s.kind }}</span>{% if s.preset %} <span class="mf-chip">{{ s.preset }}</span>{% endif %}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if result.get('errors') %}
+        <pre class="mf-errtext">{% for e in result.get('errors', []) %}{{ e.path }}: {{ e.error }}
+{% endfor %}</pre>
+        {% endif %}
+    </div>
+</div>
+{% endif %}

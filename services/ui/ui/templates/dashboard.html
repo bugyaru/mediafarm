@@ -1,13 +1,29 @@
-{% extends "base.html" %}{% block content %}
-<h1>Дашборд</h1>
-<div hx-get="/partials/stats" hx-trigger="every 5s" hx-swap="outerHTML">
-    {% include "_stats.html" %}
+{% extends "base.html" %}{% block title %}Дашборд · MediaFarm{% endblock %}
+{% block content %}
+<div class="mf-pagehead">
+    <div><h1>Дашборд</h1><p class="mf-sub">Живая сводка фермы: очередь, воркеры, последние сбои. Обновляется каждые 5 секунд.</p></div>
+    <div class="mf-chips">
+        <a class="mf-chip" href="/jobs"><b>→</b> очередь задач</a>
+        <a class="mf-chip" href="/storages"><b>→</b> хранилища</a>
+    </div>
 </div>
+{% include "_stats.html" %}
 <h2>Последние ошибки</h2>
-<table><thead><tr><th>ID</th><th>Тип</th><th>Класс</th><th>Сообщение</th></tr></thead><tbody>
-{% for j in recent %}
-<tr><td><a href="/jobs/{{ j.id }}">{{ j.id|string|truncate(8, True, '') }}</a></td>
-    <td>{{ j.kind }}</td><td>{{ j.error.get('class','') }}</td><td>{{ j.error.get('message','')|truncate(90) }}</td></tr>
-{% else %}<tr><td colspan="4">ошибок нет</td></tr>{% endfor %}
-</tbody></table>
+<div class="mf-table-wrap mf-enhance" id="dash-errors">
+    <table class="mf-table">
+        <thead><tr><th>ID</th><th>Тип</th><th>Класс</th><th>Сообщение</th></tr></thead>
+        <tbody>
+        {% for j in recent %}
+        <tr class="mf-err">
+            <td><button class="mf-link" data-drawer hx-get="/jobs/{{ j.id }}" hx-select="#job-drawer" hx-target="#mf-drawer-body" hx-swap="innerHTML">{{ j.id|string|truncate(8, True, '') }}</button><a class="mf-ext" href="/jobs/{{ j.id }}">↗</a></td>
+            <td><span class="mf-kind k-{{ j.kind }}">{{ j.kind }}</span></td>
+            <td class="mf-mono mf-small">{{ j.error.get('class','—') }}</td>
+            <td class="mf-small">{{ j.error.get('message','')|truncate(120) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="mf-empty">Ошибок нет — все системы в норме.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}
