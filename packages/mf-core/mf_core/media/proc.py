@@ -1,7 +1,10 @@
-"""Универсальный запуск внешнего процесса: построчный stdout, watchdog, отмена.
+"""Универсальный запуск внешнего процесса: построчный stdout/stderr, watchdog, отмена.
 
 Используется yt-dlp и другими не-ffmpeg инструментами. run_media останется
 ffmpeg-специфичным; общий рефакторинг.
+
+on_line — «умный» колбэк разбора (прогресс, пути файлов), только stdout.
+on_log  — «сырой» колбэк (stream, line) для ПОЛНОГО лога: получает и stdout, и stderr.
 """
 from __future__ import annotations
 
@@ -20,7 +23,7 @@ from mf_core.telemetry import get_logger
 
 log = get_logger("mf.proc")
 LineCB = Callable[[str], Awaitable[None] | None]
-
+LogCB = Callable[[str, str], None]
 
 @dataclass(slots=True)
 class ProcResult:
@@ -29,14 +32,12 @@ class ProcResult:
     lines: int
     stderr_tail: list[str]
 
-
 def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
     try:
         os.killpg(os.getpgid(proc.pid), sig)
     except (ProcessLookupError, PermissionError):
         with contextlib.suppress(ProcessLookupError):
             proc.send_signal(sig)
-
 
 async def _stop(proc: asyncio.subprocess.Process, grace_s: int, stdin_q: bool) -> None:
     if proc.returncode is not None:
@@ -56,18 +57,31 @@ async def _stop(proc: asyncio.subprocess.Process, grace_s: int, stdin_q: bool) -
     with contextlib.suppress(Exception):
         await proc.wait()
 
-
 async def run_streaming(
-        cmd: list[str], *, on_line: LineCB | None = None, cancel: asyncio.Event | None = None,
-        stall_timeout_s: int | None = None, stdin_q: bool = False,
-        settings: Settings | None = None, log_file: str | None = None,
+        cmd: list[str], *, on_line: LineCB | None = None, on_log: LogCB | None = None,
+        cancel: asyncio.Event | None = None, stall_timeout_s: int | None = None,
+        stdin_q: bool = False, settings: Settings | None = None, log_file: str | None = None,
 ) -> ProcResult:
     s = settings or get_settings()
     stall = stall_timeout_s or s.stall_timeout_s
     tail: deque[str] = deque(maxlen=200)
     started = last_tick = time.monotonic()
     count = 0
+    written = 0
     fh = open(log_file, "w", encoding="utf-8") if log_file else None  # noqa: SIM115
+
+    def emit(stream: str, line: str) -> None:
+        nonlocal written
+        if on_log is not None:
+            try:
+                on_log(stream, line)
+            except Exception as e:  # noqa: BLE001
+                log.warning("log_sink_failed", error=str(e))
+        if fh:
+            fh.write(line + "\n")
+            written += 1
+            if written % 64 == 0:
+                fh.flush()
 
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -79,23 +93,23 @@ async def run_streaming(
         nonlocal last_tick, count
         assert proc.stdout is not None
         async for raw in proc.stdout:
-            line = raw.decode("utf-8", "replace").rstrip("\n")
+            line = raw.decode("utf-8", "replace").rstrip("\r\n")
             last_tick = time.monotonic()
             count += 1
-            if fh:
-                fh.write(line + "\n")  # <--- ИЗМЕНЕНИЕ: запись stdout в лог
+            emit("stdout", line)
             if on_line is not None:
                 res = on_line(line)
                 if asyncio.iscoroutine(res):
                     await res
 
     async def read_stderr() -> None:
+        nonlocal last_tick
         assert proc.stderr is not None
         async for raw in proc.stderr:
-            line = raw.decode("utf-8", "replace").rstrip()
+            line = raw.decode("utf-8", "replace").rstrip("\r\n")
+            last_tick = time.monotonic()
             tail.append(line)
-            if fh:
-                fh.write(line + "\n")
+            emit("stderr", line)
 
     async def watchdog() -> None:
         while proc.returncode is None:
@@ -114,14 +128,15 @@ async def run_streaming(
                 tg.create_task(read_stdout())
                 tg.create_task(read_stderr())
                 tg.create_task(watchdog())
-        except*CancelledByUser as eg:
+        except* CancelledByUser as eg:
             raise eg.exceptions[0] from None
-        except*StallError as eg:
+        except* StallError as eg:
             raise eg.exceptions[0] from None
     finally:
         if proc.returncode is None:
             await _stop(proc, 2, stdin_q)
         if fh:
+            fh.flush()
             fh.close()
 
     return ProcResult(proc.returncode or 0, round(time.monotonic() - started, 2),

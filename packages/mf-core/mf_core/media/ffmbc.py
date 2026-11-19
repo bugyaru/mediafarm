@@ -17,7 +17,6 @@ STANDARDS = {
 }
 VALID_BITRATES = (30, 40, 50)
 
-
 def build_imx(
         step: StepSpec, info: MediaInfo, *, src: str, dst: str, engine: str = "ffmbc",
         standard: str = "pal", bitrate_mbps: int = 50, audio_channels: int = 2,
@@ -40,7 +39,7 @@ def build_imx(
     muxer = "mxf" if engine == "ffmbc" else "mxf_d10"
     br = f"{bitrate_mbps}M"
 
-    cmd = [binary, "-hide_banner", "-nostdin", "-v", "level+warning",
+    cmd = [binary, "-hide_banner", "-nostdin", "-v", f"level+{s.media_loglevel}",
            "-progress", "pipe:1", "-nostats", "-y"]
     cmd += input_resilience(src, s) + list(step.extra_in) + ["-i", src]
     cmd += [
@@ -56,7 +55,6 @@ def build_imx(
     cmd += list(step.extra_out) + [dst]
     return cmd
 
-
 def build_ffmbc_generic(
         step: StepSpec, info: MediaInfo, *, src: str, dst: str, settings: Settings | None = None,
 ) -> list[str]:
@@ -65,7 +63,7 @@ def build_ffmbc_generic(
     if not s.ffmbc_enabled:
         raise ConfigInvalidError("ffmbc выключен")
     v = step.video
-    cmd = [s.ffmbc_path, "-hide_banner", "-nostdin", "-v", "level+warning",
+    cmd = [s.ffmbc_path, "-hide_banner", "-nostdin", "-v", f"level+{s.media_loglevel}",
            "-progress", "pipe:1", "-nostats", "-y"]
     cmd += input_resilience(src, s) + list(step.extra_in) + ["-i", src, "-map", "0:v:0"]
     if v and v.copy:

@@ -24,6 +24,7 @@ from worker import scratch
 from worker.caps import detect
 from worker.context import JobContext
 from worker.drain import is_draining
+from worker.logsink import LogSink
 from worker.pipeline import Pipeline
 from worker.slots import Slots
 
@@ -35,7 +36,6 @@ UPDATE job SET state='queued', worker_id=NULL, lease_expires_at=NULL,
                progress='{}'::jsonb, cancel_requested=false, updated_at=now()
 WHERE id=:id AND worker_id=:w AND state='running'
 """)
-
 
 class Worker:
     def __init__(self, settings: Settings | None = None) -> None:
@@ -227,10 +227,19 @@ class Worker:
             ctx = JobContext(job=job, spec=spec, settings=s, registry=self.registry,
                              hw=self.hw, session_factory=self.sf, workdir=workdir)
             ctx.asset = asset
+            ctx.logs = LogSink(job_id=job.id, attempt=job.attempts, session_factory=self.sf,
+                               settings=s, workdir=workdir)
+            await ctx.logs.start()
+            ctx.log(f"задача {job.id} · попытка {job.attempts}/{job.max_attempts} · "
+                    f"воркер {s.worker_id} ({s.kind}) · пресет {spec.name}")
             self.contexts[job.id] = ctx
             hb = asyncio.create_task(self._job_heartbeat(ctx), name=f"hb-{job.id}")
 
             result = await Pipeline(ctx).run()
+            await ctx.flush_logs()
+            log_uri, logs = await self._upload_logs(ctx)
+            if logs:
+                result["logs"] = logs
             async with self.sf() as sess, sess.begin():
                 await q.complete(sess, job_id=job.id, worker_id=s.worker_id,
                                  state="succeeded", result=result,
@@ -240,7 +249,7 @@ class Worker:
                                 "succeeded").observe(time.monotonic() - started)
             scratch.cleanup(workdir)
             log.info("job_succeeded", job_id=str(job.id),
-                     elapsed_s=round(time.monotonic() - started, 2))
+                     elapsed_s=round(time.monotonic() - started, 2), log_uri=log_uri)
 
         except CancelledByUser:
             await self._on_cancel(job, ctx)
@@ -254,18 +263,23 @@ class Worker:
                 hb.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await hb
+            if ctx is not None and ctx.logs is not None:
+                await ctx.logs.close()
             self.contexts.pop(job.id, None)
             self.slots.release(job)
             clear_context()
 
     async def _on_cancel(self, job: q.ClaimedJob, ctx: JobContext | None) -> None:
         reason = ctx.cancel_reason if ctx else None
+        if ctx is not None:
+            ctx.log(f"задача остановлена: {reason or 'user'}", "warning")
         if reason == "drain":
             async with self.sf() as sess, sess.begin():
                 await sess.execute(DRAIN_REQUEUE, {"id": job.id, "w": self.s.worker_id})
             JOBS_TOTAL.labels("requeued", "drain").inc()
             log.info("job_requeued_on_drain", job_id=str(job.id))
             return
+        await self._upload_logs(ctx)
         async with self.sf() as sess, sess.begin():
             await q.complete(sess, job_id=job.id, worker_id=self.s.worker_id,
                              state="cancelled", error={"class": "cancelled", "code": reason})
@@ -277,13 +291,16 @@ class Worker:
         tail = list(getattr(err, "tail", None) or err.as_dict().get("tail") or [])
         log.error("job_failed", job_id=str(job.id), error_class=err.error_class,
                   message=err.message, attempt=job.attempts, tail_lines=len(tail))
-        log_uri = await self._upload_log(ctx)
+        if ctx is not None:
+            ctx.log(f"задача упала: {err.error_class}: {err.message}", "error")
+        log_uri, logs = await self._upload_logs(ctx)
 
         if err.retryable and job.attempts < job.max_attempts:
             backoff = exp_backoff(job.attempts)
             async with self.sf() as sess, sess.begin():
-                state = await q.retry(sess, job_id=job.id, worker_id=s.worker_id,
-                                      error={**err.as_dict(), "tail": tail, "log_uri": log_uri},
+                state = await q.retry(sess, job_id=job.id, worker_id=self.s.worker_id,
+                                      error={**err.as_dict(), "tail": tail, "log_uri": log_uri,
+                                             "logs": logs},
                                       backoff_s=backoff)
                 await q.add_event(sess, job.id, "retry", err.message, "warning",
                                   {"backoff_s": backoff, "state": state})
@@ -295,8 +312,9 @@ class Worker:
             return
 
         async with self.sf() as sess, sess.begin():
-            await q.complete(sess, job_id=job.id, worker_id=s.worker_id, state="failed",
-                             error={**err.as_dict(), "tail": tail, "log_uri": log_uri},
+            await q.complete(sess, job_id=job.id, worker_id=self.s.worker_id, state="failed",
+                             error={**err.as_dict(), "tail": tail, "log_uri": log_uri,
+                                    "logs": logs},
                              progress=ctx.progress if ctx else {})
             if ctx and ctx.asset:
                 await sess.execute(text("UPDATE asset SET state='failed' WHERE id=:i"),
@@ -310,26 +328,47 @@ class Worker:
 
         # ВАЖНО: НЕ удаляем scratch-папку при падении — полный ytdlp.log/ffmpeg.log
         # нужен для постмортема. Диск ограничен gc() с TTL=86400s в heartbeat-цикле.
-        # (было: scratch.cleanup(scratch.job_dir(self.s, job.id)))
 
-    async def _upload_log(self, ctx: JobContext | None) -> str | None:
+    async def _upload_logs(self, ctx: JobContext | None) -> tuple[str | None, dict[str, str]]:
+        """Выгружает ВСЕ *.log задачи в log_storage и проставляет job_step.log_uri."""
         if ctx is None:
-            return None
-        logs = list(ctx.workdir.glob("*.log"))
-        if not logs:
-            return None
+            return None, {}
+        if ctx.logs is not None:
+            await ctx.logs.close()
+        files = sorted(ctx.workdir.glob("*.log"))
+        if not files:
+            return None, {}
         # если в задаче явно не указан log_storage — берём дефолт из настроек воркера
-        target = ctx.job.params.get("log_storage") or getattr(self.s, "log_storage", None)
+        target = ctx.job.params.get("log_storage") or self.s.log_storage
         if not target:
-            return None
+            return None, {}
+        uploaded: dict[str, str] = {}
         try:
             be = ctx.registry.by_name(target)
-            rel = f"logs/{ctx.job.id}/{logs[0].name}"
-            entry = await be.upload(str(logs[0]), rel, overwrite=True)
-            return entry.uri
+            for path in files:
+                rel = f"logs/{ctx.job.id}/{path.name}"
+                entry = await be.upload(str(path), rel, overwrite=True)
+                uploaded[path.name] = entry.uri
+            await self._link_step_logs(ctx, uploaded)
         except Exception as e:  # noqa: BLE001
             log.warning("log_upload_failed", error=str(e))
-            return None
+        if not uploaded:
+            return None, {}
+        preferred = ("ytdlp.log", "transcode.log", "capture.log")
+        first = next((uploaded[n] for n in preferred if n in uploaded),
+                     next(iter(uploaded.values())))
+        return first, uploaded
+
+    async def _link_step_logs(self, ctx: JobContext, uploaded: dict[str, str]) -> None:
+        rows = [(int(name.split("_", 1)[0]), uri) for name, uri in uploaded.items()
+                if name.split("_", 1)[0].isdigit()]
+        if not rows:
+            return
+        async with self.sf() as sess, sess.begin():
+            for idx, uri in rows:
+                await sess.execute(
+                    text("UPDATE job_step SET log_uri=:u WHERE job_id=:j AND idx=:i"),
+                    {"u": uri, "j": ctx.job.id, "i": idx})
 
     # -------------------------------- drain --------------------------------
     async def _drain(self) -> None:
@@ -347,7 +386,6 @@ class Worker:
                 ctx.cancel.set()
             await asyncio.wait(pending, timeout=30)
 
-
 def cli() -> None:
     import argparse
 
@@ -358,7 +396,6 @@ def cli() -> None:
     if args.once:
         worker.s.idle_poll_s = 0.2
     asyncio.run(worker.run())
-
 
 if __name__ == "__main__":
     cli()

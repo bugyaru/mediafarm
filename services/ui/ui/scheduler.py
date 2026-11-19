@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from mf_core import queue as q
+from mf_core import joblog, queue as q
 from mf_core.config import Settings
 from mf_core.db import get_sessionmaker
 from mf_core.errors import ConfigInvalidError
@@ -22,7 +22,6 @@ from mf_core.media.presets import load_preset, resolve_spec
 from mf_core.telemetry import LEASE_REAPED, QUEUE_DEPTH, get_logger
 
 log = get_logger("mf.ui.control")
-
 
 class ControlPlane:
     def __init__(self, settings: Settings, registry) -> None:
@@ -118,6 +117,8 @@ class ControlPlane:
         days = self.s.ui_retention_days
         sm = get_sessionmaker()
         async with sm() as sess, sess.begin():
+            # полные логи инструментов живут меньше, чем сама задача
+            lg = await joblog.purge(sess, self.s.log_retention_days)
             ev = await sess.execute(text(
                 "DELETE FROM job_event WHERE ts < now() - make_interval(days => :d)"), {"d": days})
             jb = await sess.execute(text("""
@@ -127,7 +128,7 @@ class ControlPlane:
             au = await sess.execute(text(
                 "DELETE FROM audit_log WHERE ts < now() - make_interval(days => :d)"),
                 {"d": days * 2})
-        log.info("retention_done", events=ev.rowcount, jobs=jb.rowcount, audit=au.rowcount)
+        log.info("retention_done", logs=lg, events=ev.rowcount, jobs=jb.rowcount, audit=au.rowcount)
 
     # ------------------------------ расписания -----------------------------
     async def _sync_schedules(self) -> None:

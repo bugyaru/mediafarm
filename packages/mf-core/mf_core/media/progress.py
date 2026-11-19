@@ -1,4 +1,8 @@
-"""Запуск ffmpeg/ffmbc: -progress pipe:1, watchdog, мягкая отмена ('q' → SIGTERM → SIGKILL)."""
+"""Запуск ffmpeg/ffmbc: -progress pipe:1, watchdog, мягкая отмена ('q' → SIGTERM → SIGKILL).
+
+on_progress — агрегированный прогресс (для job.progress).
+on_log      — сырые строки stdout/stderr (для полного лога задачи в UI).
+"""
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +21,7 @@ from mf_core.telemetry import FFMPEG_SPEED, get_logger
 
 log = get_logger("mf.media")
 ProgressCB = Callable[[dict[str, Any]], Awaitable[None] | None]
-
+LogCB = Callable[[str, str], None]
 
 def _f(v: Any) -> float | None:
     try:
@@ -25,12 +29,10 @@ def _f(v: Any) -> float | None:
     except (TypeError, ValueError):
         return None
 
-
 def _speed(v: str | None) -> float | None:
     if not v:
         return None
     return _f(v.strip().rstrip("x"))
-
 
 @dataclass(slots=True)
 class ProgressParser:
@@ -64,7 +66,6 @@ class ProgressParser:
             "eta_s": eta, "done": v == "end",
         }
 
-
 @dataclass(slots=True)
 class RunResult:
     returncode: int
@@ -74,14 +75,12 @@ class RunResult:
     avg_speed: float | None = None
     cancelled: bool = False
 
-
 def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
     try:
         os.killpg(os.getpgid(proc.pid), sig)
     except (ProcessLookupError, PermissionError):
         with contextlib.suppress(ProcessLookupError):
             proc.send_signal(sig)
-
 
 async def _graceful_stop(proc: asyncio.subprocess.Process, grace_s: int, stdin_q: bool) -> None:
     if proc.returncode is not None:
@@ -101,13 +100,12 @@ async def _graceful_stop(proc: asyncio.subprocess.Process, grace_s: int, stdin_q
     with contextlib.suppress(Exception):
         await proc.wait()
 
-
 async def run_media(
         cmd: list[str], *, duration_s: float | None = None,
-        on_progress: ProgressCB | None = None, cancel: asyncio.Event | None = None,
-        stall_timeout_s: int | None = None, stdin_q: bool = False,
-        settings: Settings | None = None, engine: str = "ffmpeg", codec: str = "unknown",
-        progress_interval_s: float = 1.0, log_file: str | None = None,
+        on_progress: ProgressCB | None = None, on_log: LogCB | None = None,
+        cancel: asyncio.Event | None = None, stall_timeout_s: int | None = None,
+        stdin_q: bool = False, settings: Settings | None = None, engine: str = "ffmpeg",
+        codec: str = "unknown", progress_interval_s: float = 1.0, log_file: str | None = None,
 ) -> RunResult:
     s = settings or get_settings()
     stall = stall_timeout_s or s.stall_timeout_s
@@ -118,7 +116,16 @@ async def run_media(
     last_emit = 0.0
     last_snap: dict[str, Any] = {}
     speeds: list[float] = []
+    written = 0
     fh = open(log_file, "w", encoding="utf-8") if log_file else None  # noqa: SIM115
+
+    def emit_log(stream: str, line: str) -> None:
+        if on_log is None:
+            return
+        try:
+            on_log(stream, line)
+        except Exception as e:  # noqa: BLE001
+            log.warning("log_sink_failed", error=str(e))
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -146,10 +153,9 @@ async def run_media(
         nonlocal last_tick
         assert proc.stdout is not None
         async for raw in proc.stdout:
-            decoded = raw.decode("utf-8", "replace")
-            if fh:
-                fh.write(decoded)  # <--- ИЗМЕНЕНИЕ: запись stdout в лог
-            snap = parser.feed(decoded)
+            line = raw.decode("utf-8", "replace").rstrip("\r\n")
+            emit_log("stdout", line)
+            snap = parser.feed(line)
             if snap is None:
                 continue
             last_tick = time.monotonic()
@@ -158,12 +164,18 @@ async def run_media(
             await emit(snap, force=snap["done"])
 
     async def read_stderr() -> None:
+        nonlocal last_tick, written
         assert proc.stderr is not None
         async for raw in proc.stderr:
-            line = raw.decode("utf-8", "replace").rstrip()
+            line = raw.decode("utf-8", "replace").rstrip("\r\n")
+            last_tick = time.monotonic()
             tail.append(line)
+            emit_log("stderr", line)
             if fh:
                 fh.write(line + "\n")
+                written += 1
+                if written % 64 == 0:
+                    fh.flush()
 
     async def watchdog() -> None:
         while proc.returncode is None:
@@ -182,14 +194,15 @@ async def run_media(
                 tg.create_task(read_stdout())
                 tg.create_task(read_stderr())
                 tg.create_task(watchdog())
-        except*CancelledByUser as eg:
+        except* CancelledByUser as eg:
             raise eg.exceptions[0] from None
-        except*StallError as eg:
+        except* StallError as eg:
             raise eg.exceptions[0] from None
     finally:
         if proc.returncode is None:
             await _graceful_stop(proc, 2, stdin_q)
         if fh:
+            fh.flush()
             fh.close()
 
     rc = proc.returncode or 0

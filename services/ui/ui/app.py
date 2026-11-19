@@ -23,7 +23,6 @@ log = get_logger("mf.ui")
 UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 CSRF_EXEMPT_PREFIXES = ("/internal/", "/login", "/logout")
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -48,7 +47,6 @@ async def lifespan(app: FastAPI):
         await db.dispose()
         log.info("ui_stopped")
 
-
 def _build_oauth(s):
     if not (s.ui_oidc_issuer and s.ui_oidc_client_id):
         return None
@@ -60,7 +58,6 @@ def _build_oauth(s):
         client_kwargs={"scope": "openid email profile"},
     )
     return oauth
-
 
 def create_app() -> FastAPI:
     s = get_settings()
@@ -91,6 +88,7 @@ def create_app() -> FastAPI:
     from ui.auth_routes import router as auth_router
     from ui.routes.api import router as api_router
     from ui.routes.internal import router as internal_router
+    from ui.routes.logs import router as logs_router
     from ui.routes.pages import router as pages_router
     from ui.routes.ws import router as ws_router
 
@@ -98,6 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router)
     app.include_router(internal_router)
     app.include_router(ws_router)
+    app.include_router(logs_router)
     app.include_router(pages_router)
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
@@ -118,16 +117,13 @@ def create_app() -> FastAPI:
 
     return app
 
-
 app = create_app()
-
 
 def cli() -> None:
     import uvicorn
     s = get_settings()
     uvicorn.run("ui.app:app", host=s.ui_host, port=s.ui_port, proxy_headers=True,
                 forwarded_allow_ips="*", log_config=None)
-
 
 if __name__ == "__main__":
     cli()

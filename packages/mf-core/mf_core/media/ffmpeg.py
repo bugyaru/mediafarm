@@ -13,7 +13,13 @@ from mf_core.media.hwaccel import Hardware, HwDecision
 from mf_core.media.probe import MediaInfo
 from mf_core.schemas import StepSpec, VideoSpec
 
-_GLOBAL = ["-hide_banner", "-loglevel", "level+warning", "-progress", "pipe:1", "-nostats", "-y"]
+
+def global_args(settings: Settings | None = None) -> list[str]:
+    """Общие флаги ffmpeg. Уровень лога берётся из MF_MEDIA_LOGLEVEL (по умолчанию info),
+    чтобы в деталях задачи был виден полный лог, а не только warning/error."""
+    s = settings or get_settings()
+    return ["-hide_banner", "-loglevel", f"level+{s.media_loglevel}",
+            "-progress", "pipe:1", "-nostats", "-y"]
 
 
 def build_video_filters(
@@ -57,7 +63,6 @@ def build_video_filters(
         chain.append(f"format={(step.video or VideoSpec()).pix_fmt}")
     return chain
 
-
 def build_transcode(
         step: StepSpec, info: MediaInfo, hw: Hardware, *, src: str, dst: str,
         decision: HwDecision | None = None, loudnorm: dict | None = None,
@@ -68,7 +73,7 @@ def build_transcode(
     dec = decision or hw.decide(step, info)
     video = step.video or VideoSpec()
 
-    cmd = [s.ffmpeg_path, *_GLOBAL]
+    cmd = [s.ffmpeg_path, *global_args(s)]
     if not interactive:
         cmd.append("-nostdin")
     if dec.use_cuda and dec.decode_cuda:
@@ -91,7 +96,6 @@ def build_transcode(
     cmd += container_args(step.container, dst) + list(step.extra_out) + [dst]
     return cmd
 
-
 def build_loudnorm_pass1(
         info: MediaInfo, *, src: str, settings: Settings | None = None,
 ) -> list[str]:
@@ -102,16 +106,13 @@ def build_loudnorm_pass1(
         "-af", loudnorm_filter(None), "-f", "null", "-",
     ]
 
-
 _LOUDNORM_JSON = re.compile(r"\{[^{}]*\"input_i\"[^{}]*\}", re.DOTALL)
-
 
 def parse_loudnorm(stderr: str) -> dict[str, Any]:
     m = _LOUDNORM_JSON.findall(stderr)
     if not m:
         raise ConfigInvalidError("loudnorm pass1 не вернул измерений")
     return json.loads(m[-1])
-
 
 def build_thumbnail(
         step: StepSpec, info: MediaInfo, *, src: str, dst: str, at_s: float,
@@ -122,12 +123,11 @@ def build_thumbnail(
     if info.video and info.video.width:
         h = max(2, int(round(width * info.video.height / info.video.width / 2)) * 2)
     return [
-        s.ffmpeg_path, "-hide_banner", "-nostdin", "-v", "error", "-y",
+        s.ffmpeg_path, "-hide_banner", "-nostdin", "-loglevel", f"level+{s.media_loglevel}", "-y",
         *input_resilience(src, s), "-ss", f"{max(0.0, at_s):.3f}", "-i", src,
         "-map", "0:v:0", "-frames:v", "1",
         "-vf", f"scale={width}:{h}:flags=lanczos", "-q:v", "3", dst,
     ]
-
 
 def build_capture(
         *, src: str, dst: str, duration_s: int | None = None, copy: bool = True,
@@ -135,7 +135,7 @@ def build_capture(
 ) -> list[str]:
     """Захват live-потока: stream copy по умолчанию (без перекодирования)."""
     s = settings or get_settings()
-    cmd = [s.ffmpeg_path, *_GLOBAL, "-nostdin", *input_resilience(src, s), "-i", src]
+    cmd = [s.ffmpeg_path, *global_args(s), "-nostdin", *input_resilience(src, s), "-i", src]
     cmd += ["-map", "0", "-c", "copy"] if copy else ["-map", "0:v:0", "-map", "0:a?"]
     if duration_s:
         cmd += ["-t", str(duration_s)]

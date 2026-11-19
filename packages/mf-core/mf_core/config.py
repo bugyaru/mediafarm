@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 Role = Literal["ui", "watcher", "worker", "migrate", "tool"]
 WorkerKind = Literal["cpu", "cuda"]
 OnSigterm = Literal["drain", "requeue"]
-
+MediaLogLevel = Literal["quiet", "error", "warning", "info", "verbose", "debug"]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     log_format: Literal["json", "console"] = "json"
     secret_provider: Literal["env", "file"] = "env"
     secret_cache_ttl_s: int = 60
+
+    # --- полные логи инструментов (live в деталях задачи) ---
+    log_stream: bool = True                 # писать построчные логи инструментов в job_log
+    log_flush_interval_s: float = 0.7       # период сброса буфера строк в БД
+    log_flush_lines: int = 200              # ...или когда набралось столько строк
+    log_max_lines_per_job: int = 200_000    # потолок строк на задачу (защита БД)
+    log_line_max_chars: int = 8_000         # обрезка гигантских строк
+    log_progress_lines: bool = True         # хранить строки прогресса (stream=progress)
+    log_redact: bool = True                 # маскировать пароли/токены/cookie
+    log_storage: str | None = None          # хранилище для выгрузки *.log после задачи
+    log_retention_days: int = 14            # TTL строк job_log (чистит control plane)
 
     # --- worker ---
     worker_id: str = Field(default_factory=socket.gethostname)
@@ -57,12 +68,14 @@ class Settings(BaseSettings):
     probe_analyze_s: int = 10
     ffmpeg_stop_grace_s: int = 10
     media_threads: int = 0          # 0 = авто (ffmpeg сам)
+    media_loglevel: MediaLogLevel = "info"   # уровень логов ffmpeg/ffmbc/ffprobe
     ffmpeg_path: str = "/usr/local/bin/ffmpeg"
     ffprobe_path: str = "/usr/local/bin/ffprobe"
     ffmbc_path: str = "/usr/local/bin/ffmbc"
     ffmbc_enabled: bool = True
     ytdlp_path: str = "/usr/local/bin/yt-dlp"
     ytdlp_timeout_s: int = 60
+    ytdlp_verbose: bool = False     # --verbose в yt-dlp (очень подробный лог)
     egress_allow_domains: list[str] = Field(default_factory=list)   # [] = разрешить всё
     egress_block_private_ip: bool = True
 
@@ -105,6 +118,9 @@ class Settings(BaseSettings):
     ui_reaper_interval_s: int = 10
     ui_schedule_sync_s: int = 15
     ui_ws_max_clients: int = 200
+    ui_log_page_size: int = 500         # строк в одном кадре лога
+    ui_log_max_page: int = 5000         # максимум строк за один запрос
+    ui_log_ws_clients: int = 100        # одновременных «хвостов» логов
 
     @field_validator("db_dsn")
     @classmethod
@@ -146,11 +162,9 @@ class Settings(BaseSettings):
             return min(self.gpu_slots, self.nvenc_session_limit)
         return self.gpu_slots
 
-
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-
 
 def reset_settings_cache() -> None:
     get_settings.cache_clear()

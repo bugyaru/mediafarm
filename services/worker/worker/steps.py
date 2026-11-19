@@ -35,60 +35,15 @@ from worker.egress import check_url
 
 log = get_logger("mf.steps")
 
-
-async def _attach_log(ctx: JobContext, step_name: str, log_filename: str) -> None:
-    """Загружает лог-файл шага в хранилище и сохраняет URI в БД."""
-    log_path = ctx.workdir / log_filename
-    if not log_path.exists() or log_path.stat().st_size == 0:
-        return
-
-    # 1. Ищем хранилище для сохранения логов (предпочтительно то, куда идет publish)
-    storage_name = None
-    for s in ctx.spec.steps:
-        if s.id == "publish" and getattr(s, "storage", None):
-            storage_name = s.storage
-            break
-
-    # 2. Если publish не настроен, берем любое доступное включенное хранилище
-    if not storage_name:
-        for name, row in ctx.registry._by_name.items():
-            if row.enabled:
-                storage_name = name
-                break
-
-    if not storage_name:
-        log.warning("log_attach_skipped", step=step_name, reason="no_enabled_storage")
-        return
-
-    try:
-        be = ctx.registry.by_name(storage_name)
-        # Сохраняем логи в скрытую папку .logs/<job_id>/
-        rel_path = f".logs/{ctx.job.id}/{step_name}.log"
-
-        # Загружаем файл в хранилище
-        entry = await be.upload(log_path, rel_path, overwrite=True)
-
-        # Обновляем запись в БД
-        async with ctx.sf() as sess, sess.begin():
-            await sess.execute(
-                text("UPDATE job_step SET log_uri = :uri WHERE job_id = :jid AND name = :name"),
-                {"uri": entry.uri, "jid": ctx.job.id, "name": step_name}
-            )
-        log.info("log_attached", step=step_name, uri=entry.uri)
-    except Exception as e:
-        log.warning("log_attach_failed", step=step_name, error=str(e))
-
 DIRECT_EXT = (".m3u8", ".mpd", ".mp4", ".mkv", ".mov", ".ts", ".m4v", ".webm", ".mp3", ".m4a")
 DIRECT_SCHEMES = ("rtmp", "rtmps", "rtsp", "srt", "mms", "mmsh")
 CONTAINER_EXT = {"mp4": "mp4", "mov": "mov", "mkv": "mkv", "matroska": "mkv", "mxf": "mxf",
                  "mxf_d10": "mxf", "ts": "ts", "mpegts": "ts", "webm": "webm", "mp3": "mp3",
                  "wav": "wav", "flac": "flac"}
 
-
 def _suffix(uri: str) -> str:
     name = urlsplit(uri).path.rsplit("/", 1)[-1]
     return ("." + name.rsplit(".", 1)[-1]) if "." in name else ".bin"
-
 
 async def _sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -97,18 +52,20 @@ async def _sha256(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-
 async def _http_download(ctx: JobContext, url: str, dst: Path) -> Path:
     part = Path(str(dst) + ctx.s.storage_tmp_suffix)
     offset = part.stat().st_size if part.exists() else 0
     headers = {"Range": f"bytes={offset}-"} if offset else {}
+    ctx.log(f"HTTP GET {url} (resume с {offset} байт)", tool="worker")
     timeout = httpx.Timeout(30.0, read=120.0, connect=15.0)
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
         async with client.stream("GET", url, headers=headers) as r:
             if offset and r.status_code == 200:
-                offset = 0  # сервер проигнорировал Range
+                offset = 0                       # сервер проигнорировал Range
             r.raise_for_status()
             total = int(r.headers.get("content-length") or 0) + offset
+            ctx.log(f"HTTP {r.status_code} · content-length={total or '?'} · {r.url}",
+                    tool="worker")
             scratch.ensure_space(ctx.s, ctx.workdir, total)
             mode = "ab" if offset else "wb"
             async with aiofiles.open(part, mode) as f:
@@ -123,8 +80,8 @@ async def _http_download(ctx: JobContext, url: str, dst: Path) -> Path:
         raise SourceInvalidError(f"HTTP: размер не совпал {part.stat().st_size} != {total}")
     part.replace(dst)
     TRANSFER_BYTES.labels("download", "http").inc(part.stat().st_size)
+    ctx.log(f"HTTP скачано {part.stat().st_size} байт → {dst}", tool="worker")
     return dst
-
 
 # --------------------------------- acquire ---------------------------------
 async def acquire(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
@@ -141,8 +98,10 @@ async def acquire(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
         use_yt = step.engine == "ytdlp" or (step.engine is None and not direct)
         if use_yt:
             extra = step.model_extra or {}
+            ctx.log(f"yt-dlp: {url}", tool="ytdlp")
             res = await ytdlp.download(
                 url, outdir=ctx.workdir, on_progress=ctx.on_progress, cancel=ctx.cancel,
+                on_log=ctx.log_cb("ytdlp"), on_cmd=ctx.set_cmdline,
                 settings=ctx.s, resume=step.resume, live=bool(extra.get("live")),
                 live_from_start=bool(extra.get("live_from_start")),
                 max_duration_s=extra.get("max_duration_s"),
@@ -150,11 +109,14 @@ async def acquire(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
                 format_selector=extra.get("format"), playlist=bool(extra.get("playlist")),
             )
             ctx.input, ctx.input_local, ctx.yt_info = res.path, True, res.info
-            TRANSFER_BYTES.labels("download", "ytdlp").inc(Path(res.path).stat().st_size)
+            size = Path(res.path).stat().st_size
+            TRANSFER_BYTES.labels("download", "ytdlp").inc(size)
+            ctx.log(f"yt-dlp готов за {res.elapsed_s} c: {res.path} ({size} байт)", tool="ytdlp")
             return {"input": res.path, "local": True, "source": "ytdlp",
-                    "title": res.info.get("title"), "size": Path(res.path).stat().st_size}
+                    "title": res.info.get("title"), "size": size}
         if step.mode == "stream":
             ctx.input, ctx.input_local = url, False
+            ctx.log(f"источник — прямой поток: {url}")
             return {"input": url, "local": False, "source": "http-stream"}
         dst = ctx.workdir / ("input" + _suffix(url))
         await _http_download(ctx, url, dst)
@@ -164,6 +126,7 @@ async def acquire(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
 
     be, rel = ctx.registry.resolve(src)
     entry = await be.stat(rel)
+    ctx.log(f"источник {be.kind}: {src} ({entry.size} байт)")
     if isinstance(be, LocalBackend):
         local = Path(be.root) / rel
         ctx.input, ctx.input_local = str(local), True
@@ -175,20 +138,19 @@ async def acquire(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
                             on_progress=ctx.on_progress, cancel=ctx.cancel)
     TRANSFER_BYTES.labels("download", be.kind).inc(res.size)
     ctx.input, ctx.input_local = str(dst), True
+    ctx.log(f"скачано из {be.kind}: {res.size} байт (resume={res.resumed_from})")
     return {"input": str(dst), "local": True, "source": be.kind,
             "size": res.size, "resumed_from": res.resumed_from}
-
 
 # ---------------------------------- probe ----------------------------------
 async def probe(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     if not ctx.input:
         raise ConfigInvalidError("probe: нет входа (шаг acquire не выполнен)")
-
-    # <--- ИЗМЕНЕНИЕ: передача log_file в ffprobe --->
-    info = await ffprobe(ctx.input, settings=ctx.s, log_file=str(ctx.workdir / "probe.log"))
-
+    info = await ffprobe(ctx.input, settings=ctx.s, on_log=ctx.log_cb("ffprobe"))
     if not info.has_video and not info.has_audio:
         raise SourceInvalidError("в источнике нет медиапотоков", uri=ctx.input)
+    ctx.log(f"ffprobe: {info.format_name} · {info.duration} c · "
+            f"video={info.video_codec} · audio={len(info.audio)}", tool="ffprobe")
 
     transcode = next((s for s in ctx.spec.steps if s.id == "transcode"), None)
     need_idet = (
@@ -198,7 +160,9 @@ async def probe(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     )
     idet: dict[str, Any] = {}
     if need_idet:
-        idet = await detect_interlace(ctx.input, frames=150, settings=ctx.s)
+        idet = await detect_interlace(ctx.input, frames=150, settings=ctx.s,
+                                      on_log=ctx.log_cb("ffmpeg"))
+        ctx.log(f"idet: {idet}", tool="ffmpeg")
         if idet.get("interlaced") is not None and idet.get("confidence", 0) > 0.6:
             v = dataclasses.replace(info.video, interlaced=bool(idet["interlaced"]),
                                     field_order=idet.get("field_order"))
@@ -211,9 +175,7 @@ async def probe(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
                 text("UPDATE asset SET probe = CAST(:p AS jsonb), updated_at = now() WHERE id = :i"),
                 {"p": json.dumps(info.to_dict(), ensure_ascii=False), "i": ctx.asset["id"]},
             )
-    await _attach_log(ctx, "probe", "probe.log")
     return {"probe": info.to_dict(), "idet": idet}
-
 
 # -------------------------------- transcode --------------------------------
 async def transcode(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
@@ -224,7 +186,7 @@ async def transcode(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     out = ctx.workdir / f"output.{ext}"
     out.unlink(missing_ok=True)
     scratch.ensure_space(ctx.s, ctx.workdir, (out.stat().st_size if out.exists() else 0)
-                         + int((ctx.info.size or 0) * 1.5) + 64 * 1024 ** 2)
+                         + int((ctx.info.size or 0) * 1.5) + 64 * 1024**2)
 
     engine = step.engine or "ffmpeg"
     if engine == "ffmbc":
@@ -236,10 +198,13 @@ async def transcode(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
                             audio_channels=int(extra.get("audio_channels", 2)), settings=ctx.s)
         else:
             cmd = build_ffmbc_generic(step, ctx.info, src=ctx.input, dst=str(out), settings=ctx.s)
+        await ctx.set_cmdline(cmd)
         res = await run_media(cmd, duration_s=ctx.info.duration, on_progress=ctx.on_progress,
-                              cancel=ctx.cancel, settings=ctx.s, engine="ffmbc",
-                              codec="mpeg2video", log_file=str(ctx.workdir / "transcode.log"))
+                              on_log=ctx.log_cb("ffmbc"), cancel=ctx.cancel, settings=ctx.s,
+                              engine="ffmbc", codec="mpeg2video",
+                              log_file=str(ctx.workdir / "transcode.log"))
         ctx.metrics.update({"engine": "ffmbc", "hw": "cpu", "speed": res.avg_speed})
+        ctx.log(f"ffmbc готов за {res.elapsed_s} c · speed={res.avg_speed}", tool="ffmbc")
         return {"path": str(out), "size": out.stat().st_size, "engine": "ffmbc",
                 "hw": False, "speed": res.avg_speed}
 
@@ -248,32 +213,37 @@ async def transcode(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     if any(a.loudnorm == "ebu_r128" for a in step.audio):
         p1 = build_loudnorm_pass1(ctx.info, src=ctx.input, settings=ctx.s)
         ln_log = ctx.workdir / "loudnorm.log"
+        ctx.log("loudnorm pass 1: измерение громкости", tool="ffmpeg")
+        await ctx.set_cmdline(p1)
         r1 = await run_media(p1, duration_s=ctx.info.duration, cancel=ctx.cancel,
-                             settings=ctx.s, engine="ffmpeg", codec="loudnorm",
-                             log_file=str(ln_log))
+                             on_log=ctx.log_cb("ffmpeg"), settings=ctx.s,
+                             engine="ffmpeg", codec="loudnorm", log_file=str(ln_log))
         measured = parse_loudnorm(ln_log.read_text(encoding="utf-8"))
         ctx.metrics["loudnorm"] = measured
+        ctx.log(f"loudnorm: {measured}", tool="ffmpeg")
         _ = r1
 
     dec = ctx.hw.decide(step, ctx.info)
     if step.hwaccel == "cuda" and not dec.use_cuda and not step.fallback_to_cpu:
         raise HWAccelError(f"CUDA недоступна: {dec.reason}", reason=dec.reason)
+    ctx.log(f"ffmpeg: hw={'cuda' if dec.use_cuda else 'cpu'} ({dec.reason})", tool="ffmpeg")
 
     cmd = build_transcode(step, ctx.info, ctx.hw, src=ctx.input, dst=str(out),
                           decision=dec, loudnorm=measured, interactive=True, settings=ctx.s)
     codec = (step.video.codec if dec.use_cuda else step.video.cpu_codec) if step.video else "copy"
+    await ctx.set_cmdline(cmd)
     res = await run_media(cmd, duration_s=ctx.info.duration, on_progress=ctx.on_progress,
-                          cancel=ctx.cancel, stdin_q=True, settings=ctx.s,
-                          engine="ffmpeg", codec=codec,
+                          on_log=ctx.log_cb("ffmpeg"), cancel=ctx.cancel, stdin_q=True,
+                          settings=ctx.s, engine="ffmpeg", codec=codec,
                           log_file=str(ctx.workdir / "transcode.log"))
     if not out.exists() or out.stat().st_size == 0:
         raise SourceInvalidError("ffmpeg не создал результат", path=str(out))
     ctx.metrics.update({"engine": "ffmpeg", "hw": "cuda" if dec.use_cuda else "cpu",
                         "hw_reason": dec.reason, "codec": codec, "speed": res.avg_speed})
-    await _attach_log(ctx, "transcode", "transcode.log")
+    ctx.log(f"ffmpeg готов за {res.elapsed_s} c · {out.stat().st_size} байт · "
+            f"speed={res.avg_speed}", tool="ffmpeg")
     return {"path": str(out), "size": out.stat().st_size, "engine": "ffmpeg",
             "hw": dec.use_cuda, "codec": codec, "speed": res.avg_speed}
-
 
 # -------------------------------- thumbnail --------------------------------
 async def thumbnail(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
@@ -288,15 +258,13 @@ async def thumbnail(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
         dst = ctx.workdir / f"thumb_{i:02d}.jpg"
         cmd = build_thumbnail(step, ctx.info, src=ctx.input, dst=str(dst),
                               at_s=min(at_s, max(0.0, duration - 0.1)), settings=ctx.s)
-
-        # <--- ИЗМЕНЕНИЕ: передача log_file в run_media --->
+        await ctx.set_cmdline(cmd)
         await run_media(cmd, settings=ctx.s, engine="ffmpeg", codec="mjpeg",
-                        stall_timeout_s=60, log_file=str(ctx.workdir / f"thumbnail_{i:02d}.log"))
+                        on_log=ctx.log_cb("ffmpeg"), stall_timeout_s=60)
         if dst.exists():
             paths.append(str(dst))
-    await _attach_log(ctx, "thumbnail", "thumbnail_00.log")
+    ctx.log(f"превью: {len(paths)} шт.", tool="ffmpeg")
     return {"paths": paths}
-
 
 # ---------------------------------- verify ---------------------------------
 async def verify(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
@@ -305,8 +273,11 @@ async def verify(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     path = out.get("path") or out.get("input")
     if not path:
         raise ConfigInvalidError("verify: нечего проверять")
-    return await verify_output(path, checks=step.checks, src_info=ctx.info, local_path=path)
-
+    ctx.log(f"verify: {path} · проверки {step.checks}")
+    report = await verify_output(path, checks=step.checks, src_info=ctx.info, local_path=path,
+                                 settings=ctx.s, on_log=ctx.log_cb("ffprobe"))
+    ctx.log(f"verify пройден: {report['checks']} проверок")
+    return report
 
 # ---------------------------------- publish --------------------------------
 async def publish(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
@@ -338,14 +309,17 @@ async def publish(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
             rel = f"{base}_v{n}{dot}{ext}" if dot else f"{rel}_v{n}"
             n += 1
     elif mode == "skip" and await be.exists(rel):
+        ctx.log(f"publish пропущен: {be.uri(rel)} уже есть", "warning")
         await ctx.event("publish_skipped", rel, data={"uri": be.uri(rel)})
         return {"skipped": True, "uri": be.uri(rel), "artifacts": []}
 
     want_checksum = bool((step.model_extra or {}).get("checksum"))
     checksum = await _sha256(Path(src_path)) if want_checksum else None
+    ctx.log(f"publish → {be.kind}:{storage_name}/{rel} (conflict={mode})")
     entry = await be.upload(src_path, rel, overwrite=(mode == "overwrite"),
                             on_progress=ctx.on_progress, cancel=ctx.cancel, checksum=checksum)
     TRANSFER_BYTES.labels("upload", be.kind).inc(entry.size)
+    ctx.log(f"опубликовано: {entry.uri} ({entry.size} байт)")
 
     records = [{"storage_id": row.id, "uri": entry.uri, "role": "output",
                 "size": entry.size, "checksum": checksum, "probe": {}}]
@@ -366,7 +340,6 @@ async def publish(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     ctx.artifacts.extend(records)
     return {"uri": entry.uri, "size": entry.size, "artifacts": len(records)}
 
-
 # ---------------------------------- notify ---------------------------------
 async def notify(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     url = (step.model_extra or {}).get("url") or ctx.job.params.get("notify_url")
@@ -374,11 +347,12 @@ async def notify(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
         return {"skipped": "no url"}
     payload = {"job_id": str(ctx.job.id), "state": "succeeded",
                "artifacts": [a["uri"] for a in ctx.artifacts], "metrics": ctx.metrics}
+    ctx.log(f"webhook POST {url}")
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(url, json=payload)
         r.raise_for_status()
+    ctx.log(f"webhook ответил {r.status_code}")
     return {"status": r.status_code}
-
 
 async def capture(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     from mf_core.media.ffmpeg import build_capture
@@ -390,17 +364,16 @@ async def capture(step: StepSpec, ctx: JobContext) -> dict[str, Any]:
     cmd = build_capture(src=src, dst=str(out), duration_s=extra.get("duration_s"),
                         copy=bool(extra.get("copy", True)),
                         segment_s=extra.get("segment_s"), settings=ctx.s)
-
-    # <--- ИЗМЕНЕНИЕ: передача log_file в run_media --->
+    await ctx.set_cmdline(cmd)
     res = await run_media(cmd, duration_s=extra.get("duration_s"), on_progress=ctx.on_progress,
-                          cancel=ctx.cancel, settings=ctx.s, engine="ffmpeg", codec="copy",
+                          on_log=ctx.log_cb("ffmpeg"), cancel=ctx.cancel, settings=ctx.s,
+                          engine="ffmpeg", codec="copy",
                           log_file=str(ctx.workdir / "capture.log"))
     ctx.metrics.update({"engine": "ffmpeg", "hw": "cpu", "speed": res.avg_speed})
-    await _attach_log(ctx, "capture", "capture.log")
+    ctx.log(f"захват завершён за {res.elapsed_s} c", tool="ffmpeg")
     return {"path": str(out), "size": out.stat().st_size, "engine": "ffmpeg", "hw": False}
-
 
 HANDLERS = {
     "acquire": acquire, "probe": probe, "transcode": transcode, "thumbnail": thumbnail,
-    "verify": verify, "publish": publish, "notify": notify,
+    "verify": verify, "publish": publish, "notify": notify, "capture": capture,
 }

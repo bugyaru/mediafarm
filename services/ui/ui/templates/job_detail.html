@@ -1,5 +1,8 @@
 {% extends "base.html" %}{% block title %}Задача {{ job.id|string|truncate(8, True, '') }} · MediaFarm{% endblock %}
 
+{% block head %}<link rel="stylesheet" href="/static/logs.css?v=1">{% endblock %}
+{% block scripts %}<script src="/static/logs.js?v=1" defer></script>{% endblock %}
+
 {% block content %}
 
 <div class="mf-pagehead">
@@ -56,6 +59,48 @@
     <div class="mf-small mf-muted">полный лог сохранён в хранилище: <code data-copy="{{ job.error.get('log_uri') }}">{{ job.error.get('log_uri') }}</code></div>
     {% endif %}
     {% endif %}
+</div>
+
+<h2>Логи инструментов <span class="mf-muted mf-small">полный вывод yt-dlp / ffmpeg / ffmbc / ffprobe · live</span></h2>
+<div class="card mf-logcard" id="mf-logs"
+     data-job="{{ job.id }}" data-state="{{ job.state }}" data-page="500"
+     data-api="/jobs/{{ job.id }}/logs" data-ws="/ws/jobs/{{ job.id }}/logs">
+    <div class="mf-logbar">
+        <span id="mf-log-led" class="mf-led"></span>
+        <span id="mf-log-status" class="mf-small mf-muted">…</span>
+        <span id="mf-log-state" class="mf-st s-{{ job.state }}">{{ job.state }}</span>
+        <select id="mf-log-step" title="Шаг конвейера">
+            <option value="">все шаги</option>
+            {% for s in steps %}<option value="{{ s.idx }}">{{ s.idx }}. {{ s.name }}</option>{% endfor %}
+        </select>
+        <select id="mf-log-tool" title="Инструмент">
+            <option value="">все инструменты</option>
+            <option value="ytdlp">yt-dlp</option>
+            <option value="ffmpeg">ffmpeg</option>
+            <option value="ffmbc">ffmbc</option>
+            <option value="ffprobe">ffprobe</option>
+            <option value="worker">worker</option>
+        </select>
+        <label><input type="checkbox" id="mf-log-stdout" checked>stdout</label>
+        <label><input type="checkbox" id="mf-log-stderr" checked>stderr</label>
+        <label><input type="checkbox" id="mf-log-meta" checked>meta</label>
+        <label><input type="checkbox" id="mf-log-progress">прогресс</label>
+        <input type="search" id="mf-log-q" placeholder="поиск по логу…" autocomplete="off">
+        <label><input type="checkbox" id="mf-log-follow" checked>следовать</label>
+        <label><input type="checkbox" id="mf-log-wrap">перенос</label>
+        <span class="spacer"></span>
+        <span class="mf-small mf-muted">строк: <b id="mf-log-count">0</b></span>
+        <button type="button" class="mf-btn mf-btn-sm mf-btn-ghost" id="mf-log-older">↑ раньше</button>
+        <button type="button" class="mf-btn mf-btn-sm" id="mf-log-reload">Обновить</button>
+        <button type="button" class="mf-btn mf-btn-sm mf-btn-ghost" id="mf-log-clear">Очистить</button>
+        <a class="mf-btn mf-btn-sm mf-btn-ghost" id="mf-log-download"
+           href="/jobs/{{ job.id }}/logs/raw?download=1">Скачать</a>
+    </div>
+    <div class="mf-logview" id="mf-log-view" tabindex="0"></div>
+    <div class="mf-logfoot mf-small mf-muted">
+        Воркер пишет строки пачками (~0.7 с) в <code>job_log</code>, браузер получает их по WebSocket;
+        при обрыве WS включается опрос REST. Пароли, токены и cookie маскируются.
+    </div>
 </div>
 
 <h2>Шаги конвейера</h2>

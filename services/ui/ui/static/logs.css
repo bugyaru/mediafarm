@@ -1,0 +1,42 @@
+/* MediaFarm · панель полного лога инструментов в деталях задачи */
+.mf-logcard { padding: 0; overflow: hidden; }
+
+.mf-logbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    padding: 10px 12px; border-bottom: 1px solid rgba(127, 127, 127, .25);
+}
+.mf-logbar label {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px; opacity: .85; cursor: pointer; user-select: none;
+}
+.mf-logbar select,
+.mf-logbar input[type="search"] {
+    font-size: 12px; padding: 3px 6px; border-radius: 6px;
+    border: 1px solid rgba(127, 127, 127, .35); background: transparent; color: inherit;
+}
+.mf-logbar input[type="search"] { min-width: 190px; }
+.mf-logbar .spacer { flex: 1 1 auto; }
+
+.mf-logview {
+    height: 460px; overflow: auto; padding: 8px 10px;
+    background: #0e1116; color: #d6deeb;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.45;
+}
+.mf-logview:focus { outline: 1px solid #7aa2f7; outline-offset: -1px; }
+
+.mf-logline { display: flex; gap: 8px; white-space: pre; }
+.mf-logline.mf-hidden { display: none; }
+.mf-logline .ts { flex: 0 0 86px; color: #5f6b7a; }
+.mf-logline .tag { flex: 0 0 152px; color: #7aa2f7; opacity: .85; }
+.mf-logline .tx { flex: 1 1 auto; }
+.mf-logview.wrap .mf-logline { white-space: normal; }
+.mf-logview.wrap .mf-logline .tx { white-space: pre-wrap; word-break: break-all; }
+
+.mf-logline.lv-debug .tx { color: #7f8ea3; }
+.mf-logline.lv-warning .tx { color: #e0af68; }
+.mf-logline.lv-error .tx { color: #f7768e; font-weight: 600; }
+.mf-logline.sm-meta .tx { color: #9ece6a; }
+.mf-logline.sm-progress .tx { color: #565f89; }
+
+.mf-logfoot { padding: 6px 12px; border-top: 1px solid rgba(127, 127, 127, .25); }

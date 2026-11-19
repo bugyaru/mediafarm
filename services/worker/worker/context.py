@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from mf_core import queue as q
+from sqlalchemy import text
+
+from mf_core import joblog, queue as q
 from mf_core.config import Settings
 from mf_core.errors import LeaseLost
 from mf_core.media.hwaccel import Hardware
@@ -14,12 +18,12 @@ from mf_core.media.probe import MediaInfo
 from mf_core.schemas import PresetSpec
 from mf_core.storage import StorageRegistry
 from mf_core.telemetry import get_logger
+from worker.logsink import LogSink
 
 log = get_logger("mf.job")
 
 WEIGHTS = {"acquire": 10, "probe": 2, "transcode": 75, "thumbnail": 3,
            "verify": 2, "publish": 8, "notify": 1}
-
 
 class JobContext:
     def __init__(
@@ -42,6 +46,7 @@ class JobContext:
         self.artifacts: list[dict[str, Any]] = []
         self.metrics: dict[str, Any] = {}
         self.yt_info: dict[str, Any] = {}
+        self.logs: LogSink | None = None
 
         self._weights = [WEIGHTS.get(st.id, 5) for st in spec.steps]
         self._total_weight = sum(self._weights) or 1
@@ -55,6 +60,8 @@ class JobContext:
         self._last_emit = 0.0
         self.progress = {"pct": self._base_pct(), "step": self.spec.steps[idx].id,
                          "step_idx": idx, "step_pct": 0.0}
+        if self.logs is not None:
+            self.logs.set_step(idx, self.spec.steps[idx].id)
 
     def _base_pct(self) -> float:
         return round(sum(self._weights[:self._step_idx]) / self._total_weight * 100, 2)
@@ -79,6 +86,30 @@ class JobContext:
             **{k: v for k, v in payload.items() if k in
                ("fps", "speed", "eta_s", "bitrate", "frame", "bytes", "total", "out_time_s")},
         }
+
+    # ---------------- полный лог ----------------
+    def log_cb(self, tool: str) -> Callable[[str, str], None] | None:
+        """Колбэк (stream, line) для run_media/run_streaming/ffprobe."""
+        return self.logs.writer(tool) if self.logs is not None else None
+
+    def log(self, message: str, level: str = "info", tool: str = "worker") -> None:
+        if self.logs is not None:
+            self.logs.meta(message, level, tool)
+
+    async def flush_logs(self) -> None:
+        if self.logs is not None:
+            await self.logs.flush()
+
+    async def set_cmdline(self, cmd: list[str] | str) -> None:
+        """Командная строка инструмента — в job_step.cmdline и в лог задачи."""
+        line = cmd if isinstance(cmd, str) else shlex.join(cmd)
+        line = joblog.sanitize(line, max_chars=self.s.log_line_max_chars, redact=self.s.log_redact)
+        self.log("$ " + line)
+        async with self.sf() as s, s.begin():
+            await s.execute(
+                text("UPDATE job_step SET cmdline = :c WHERE job_id = :j AND idx = :i"),
+                {"c": line, "j": self.job.id, "i": self._step_idx},
+            )
 
     # ---------------- БД ----------------
     async def step_start(self, idx: int, name: str, engine: str | None,

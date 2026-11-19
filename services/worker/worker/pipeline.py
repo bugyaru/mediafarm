@@ -14,7 +14,6 @@ from worker.steps import HANDLERS
 log = get_logger("mf.pipeline")
 Handler = Callable[[StepSpec, JobContext], Awaitable[dict[str, Any]]]
 
-
 class Pipeline:
     def __init__(self, ctx: JobContext, handlers: dict[str, Handler] | None = None) -> None:
         self.ctx = ctx
@@ -29,6 +28,7 @@ class Pipeline:
             if handler is None:
                 await ctx.step_start(idx, step.id, step.engine)
                 await ctx.step_finish(idx, "skipped", {"reason": "no handler"})
+                await ctx.flush_logs()
                 continue
 
             await ctx.step_start(idx, step.id, step.engine)
@@ -36,18 +36,24 @@ class Pipeline:
             try:
                 result = await self._run_with_fallback(idx, step, handler)
             except LeaseLost:
+                await ctx.flush_logs()
                 raise
             except Exception as e:
-                await ctx.step_finish(idx, "failed", error=getattr(e, "as_dict", lambda: {
-                    "message": str(e)})())
+                err = getattr(e, "as_dict", lambda: {"message": str(e)})()
+                ctx.log(f"шаг {step.id} упал: {err.get('message', e)}", "error")
+                await ctx.flush_logs()
+                await ctx.step_finish(idx, "failed", error=err)
                 raise
             elapsed = time.monotonic() - started
             STEP_DURATION.labels(step.id, step.engine or "python").observe(elapsed)
+            ctx.log(f"шаг {step.id} завершён за {elapsed:.2f} c")
+            await ctx.flush_logs()
             await ctx.step_finish(idx, "succeeded", {**result, "elapsed_s": round(elapsed, 2)}
             if isinstance(result, dict) else {"elapsed_s": elapsed})
             ctx.outputs[step.id] = result
             log.info("step_done", step=step.id, elapsed_s=round(elapsed, 2))
 
+        await ctx.flush_logs()
         return {"artifacts": [_serialize(a) for a in ctx.artifacts], "metrics": ctx.metrics,
                 "output": ctx.outputs.get("publish") or ctx.outputs.get("transcode")}
 
@@ -58,12 +64,12 @@ class Pipeline:
             if not (step.fallback_to_cpu and step.id == "transcode"):
                 raise
             HW_FALLBACK.labels(e.details.get("reason", "hwaccel")).inc()
+            self.ctx.log(f"CUDA недоступна ({e}) — перехожу на CPU", "warning")
             await self.ctx.event("hw_fallback", str(e), level="warning",
                                  data={"reason": e.details})
             cpu_step = step.model_copy(update={"hwaccel": "cpu"})
             log.warning("hw_fallback_to_cpu", step=step.id, error=str(e))
             return await handler(cpu_step, self.ctx)
-
 
 def _serialize(artifact: dict) -> dict:
     out = dict(artifact)

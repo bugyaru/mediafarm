@@ -1,7 +1,7 @@
 [
   "ffmpeg",
   "-hide_banner",
-  "-loglevel", "level+warning",
+  "-loglevel", "level+info",
   "-progress", "pipe:1",
   "-nostats",
   "-y",

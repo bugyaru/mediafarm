@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from mf_core.config import Settings
 from mf_core.errors import VerifyFailed
 from mf_core.media.probe import MediaInfo, ffprobe
 
 _CMP = re.compile(r"^\s*([a-z_]+)\s*(<=|>=|==|<|>)\s*([\d.]+)\s*$")
 _FLAGS = {"has_video", "has_audio", "no_audio", "has_subtitles"}
-
 
 def _metrics(info: MediaInfo, path: Path | None) -> dict[str, float]:
     v = info.video
@@ -27,12 +28,12 @@ def _metrics(info: MediaInfo, path: Path | None) -> dict[str, float]:
         "has_subtitles": 1.0 if info.subtitle_indexes else 0.0,
     }
 
-
 async def verify_output(
         output: str, *, checks: list[str], src_info: MediaInfo | None = None,
-        local_path: str | None = None,
+        local_path: str | None = None, settings: Settings | None = None,
+        on_log: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
-    info = await ffprobe(output)
+    info = await ffprobe(output, settings=settings, on_log=on_log)
     path = Path(local_path) if local_path else None
     m = _metrics(info, path)
     failures: list[str] = []
@@ -62,7 +63,6 @@ async def verify_output(
     if failures:
         raise VerifyFailed("проверка результата не пройдена", failures=failures, metrics=m)
     return {"metrics": m, "probe": info.to_dict(), "checks": len(checks or [])}
-
 
 def _cmp(a: float, op: str, b: float) -> bool:
     return {"<=": a <= b, ">=": a >= b, "<": a < b, ">": a > b, "==": abs(a - b) < 1e-6}[op]

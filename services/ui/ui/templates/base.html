@@ -8,6 +8,7 @@
     <script src="/static/vendor/htmx-ws.js" defer></script>
     <script src="/static/vendor/alpine.min.js" defer></script>
     <script src="/static/mf.js?v=3" defer></script>
+    {% block head %}{% endblock %}
 </head>
 <body hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'>
 {% set p = request.url.path if request is defined else '' %}
@@ -53,5 +54,6 @@
     </aside>
 </div>
 <div id="mf-toasts"></div>
+{% block scripts %}{% endblock %}
 </body>
 </html>
